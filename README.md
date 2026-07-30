@@ -8,7 +8,7 @@ Telegram бот-путівник для проведення квестів із
 
 ```env
 BOT_TOKEN=ваш_токен_бота
-ADMIN_GROUP_ID=-1001234567890
+ADMIN_GROUP_ID=
 STATION_COOLDOWN_SECONDS=300
 DB_PATH=bot_data.db
 ```
