@@ -1,16 +1,21 @@
 import time
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_GROUP_ID, STATION_COOLDOWN_SECONDS
 import database as db
 
 router = Router()
 
-def get_done_keyboard():
+def get_done_reply_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Виконано")]],
+        keyboard=[[KeyboardButton(text="🟢 ✅ Виконано")]],
         resize_keyboard=True
+    )
+
+def get_done_inline_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🟢 ✅ Виконано", callback_data="done_station")]]
     )
 
 @router.message(F.chat.type == "private", CommandStart())
@@ -57,9 +62,9 @@ async def cmd_start(message: types.Message):
                     
                     await message.reply(
                         f"📍 Ваше поточне завдання: **{st_name}**\n\n"
-                        f"Після виконання натисніть кнопку **«✅ Виконано»**.",
+                        f"Після виконання натисніть зелену кнопку **«🟢 ✅ Виконано»**.",
                         parse_mode="Markdown",
-                        reply_markup=get_done_keyboard()
+                        reply_markup=get_done_inline_keyboard()
                     )
                     return
         
@@ -99,9 +104,9 @@ async def process_team_registration(message: types.Message, team_id: str):
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
                     f"📍 Ваше перше завдання: **{st_name}**\n\n"
                     f"⏱️ На виконання відводиться 5 хвилин.\n"
-                    f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
+                    f"Після завершення натисніть зелену кнопку **«🟢 ✅ Виконано»** нижче.",
                     parse_mode="Markdown",
-                    reply_markup=get_done_keyboard()
+                    reply_markup=get_done_inline_keyboard()
                 )
             else:
                 await message.reply(
@@ -125,20 +130,18 @@ async def process_team_registration(message: types.Message, team_id: str):
         await message.reply(f"⚠️ Ви вже зареєстровані за командою **№{team_num}**.", parse_mode="Markdown")
 
 
-@router.message(F.chat.type == "private", F.text.in_({"✅ Виконано", "Виконано"}))
-async def handle_done_button(message: types.Message):
-    user_id = message.from_user.id
+async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=None):
     progress = await db.get_user_progress(user_id)
     
     if not progress:
-        await message.reply("⚠️ Ви не зареєстровані у грі або гра ще не розпочалася. Надішліть номер своєї команди.", parse_mode="Markdown")
+        await reply_func("⚠️ Ви не зареєстровані у грі або гра ще не розпочалася. Надішліть номер своєї команди.")
         return
     
     if progress["status"] == "waiting_final_word":
-        await message.reply("🎉 Ви вже пройшли всі завдання!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
+        await reply_func("🎉 Ви вже пройшли всі завдання!\n\nВведіть фінальне повідомлення:")
         return
     elif progress["status"] == "completed":
-        await message.reply("🏆 Ви вже успішно завершили квест!", reply_markup=ReplyKeyboardRemove())
+        await reply_func("🏆 Ви вже успішно завершили квест!")
         return
     
     now_time = time.time()
@@ -150,12 +153,12 @@ async def handle_done_button(message: types.Message):
         remaining = int(cooldown - elapsed)
         mins = remaining // 60
         secs = remaining % 60
+        warning_msg = f"⏳ Не минуло 5 хвилин, які відводяться на виконання.\nЗалишилось: {mins} хв. {secs} сек."
         
-        await message.reply(
-            f"⏳ Не минуло 5 хвилин, які відводяться на виконання.\n"
-            f"Залишилось: **{mins} хв. {secs} сек.**",
-            parse_mode="Markdown"
-        )
+        if alert_func:
+            await alert_func(warning_msg, show_alert=True)
+        else:
+            await reply_func(warning_msg)
         return
     
     # 5 minutes passed -> Advance to next station
@@ -163,36 +166,61 @@ async def handle_done_button(message: types.Message):
     route = await db.get_route(team_id)
     
     if not route:
-        await message.reply("⚠️ У вашої команди відсутній маршрут. Зверніться до адмінів.", parse_mode="Markdown")
+        await reply_func("⚠️ У вашої команди відсутній маршрут. Зверніться до адмінів.")
         return
     
     curr_index = progress["current_index"]
     next_index = curr_index + 1
     
     if next_index < len(route):
-        # Move to next station
         await db.advance_user_station(user_id, next_index, now_time)
         
         next_st_id = route[next_index]["station_id"]
         st_info = await db.get_station(next_st_id)
         st_name = st_info["name"] if st_info and st_info["name"] else next_st_id
         
-        await message.reply(
+        if alert_func:
+            await alert_func("✅ Завдання виконано! Наступне завдання надіслано.")
+        
+        await bot.send_message(
+            user_id,
             f"✅ Виконано!\n\n"
             f"📍 Наступне завдання: **{st_name}**\n\n"
             f"⏱️ У вас є 5 хвилин на виконання.",
             parse_mode="Markdown",
-            reply_markup=get_done_keyboard()
+            reply_markup=get_done_inline_keyboard()
         )
     else:
-        # Reached the end of all stations!
         await db.set_user_status(user_id, "waiting_final_word")
-        await message.reply(
+        if alert_func:
+            await alert_func("🎉 Вітаємо! Ви пройшли всі завдання.")
+        
+        await bot.send_message(
+            user_id,
             "🎉 **Вітаємо! Ви пройшли всі завдання.**\n\n"
             "Введіть фінальне повідомлення:",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove()
         )
+
+
+@router.callback_query(F.data == "done_station")
+async def callback_done_station(callback: types.CallbackQuery):
+    await check_and_advance_station(
+        bot=callback.bot,
+        user_id=callback.from_user.id,
+        reply_func=lambda text: callback.message.reply(text, parse_mode="Markdown"),
+        alert_func=callback.answer
+    )
+
+
+@router.message(F.chat.type == "private", F.text.in_({"🟢 ✅ Виконано", "✅ Виконано", "Виконано"}))
+async def handle_done_button(message: types.Message):
+    await check_and_advance_station(
+        bot=message.bot,
+        user_id=message.from_user.id,
+        reply_func=lambda text: message.reply(text, parse_mode="Markdown")
+    )
 
 
 @router.message(F.chat.type == "private")
@@ -243,9 +271,9 @@ async def handle_private_text(message: types.Message):
         # User is already registered and typed something else
         if progress and progress["status"] == "in_progress":
             await message.reply(
-                "Для підтвердження проходження натисніть кнопку **«✅ Виконано»** під полем вводу.",
+                "Для підтвердження проходження натисніть зелену кнопку **«🟢 ✅ Виконано»** під завданням.",
                 parse_mode="Markdown",
-                reply_markup=get_done_keyboard()
+                reply_markup=get_done_inline_keyboard()
             )
         elif progress and progress["status"] == "completed":
             await message.reply("🏆 Ви вже успішно завершили квест!")

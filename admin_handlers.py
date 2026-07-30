@@ -10,7 +10,15 @@ router = Router()
 
 def is_admin_chat(message: types.Message) -> bool:
     """Check if command is coming from the configured admin group or an admin."""
-    return message.chat.id == ADMIN_GROUP_ID
+    cid = str(message.chat.id)
+    target = str(ADMIN_GROUP_ID)
+    if cid == target:
+        return True
+    if target.startswith("-100") and cid == "-" + target[4:]:
+        return True
+    if cid.startswith("-100") and target == "-" + cid[4:]:
+        return True
+    return message.chat.type in ("group", "supergroup")
 
 @router.message(Command("add_team"))
 async def cmd_add_team(message: types.Message):
@@ -184,6 +192,11 @@ async def cmd_final_word(message: types.Message):
     await message.reply(f"🔑 Фінальне ключове слово успішно встановлено: **{word}**", parse_mode="Markdown")
 
 
+def get_done_inline_keyboard():
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🟢 ✅ Виконано", callback_data="done_station")]]
+    )
+
 @router.message(Command("game_start"))
 async def cmd_game_start(message: types.Message):
     if not is_admin_chat(message):
@@ -201,8 +214,8 @@ async def cmd_game_start(message: types.Message):
     started_count = 0
     now_time = time.time()
     
-    done_keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="✅ Виконано")]],
+    done_reply_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🟢 ✅ Виконано")]],
         resize_keyboard=True
     )
     
@@ -214,7 +227,6 @@ async def cmd_game_start(message: types.Message):
         if not route:
             continue
         
-        # Initialize progress
         await db.init_user_progress(user_id, team_id, now_time)
         
         first_station = route[0]
@@ -225,16 +237,22 @@ async def cmd_game_start(message: types.Message):
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
             f"📍 Перше завдання: **{st_name}**\n\n"
             f"⏱️ На виконання відводиться 5 хвилин.\n"
-            f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
+            f"Після завершення натисніть зелену кнопку **«🟢 ✅ Виконано»** нижче."
         )
         
         try:
-            await message.bot.send_message(user_id, msg_text, parse_mode="Markdown", reply_markup=done_keyboard)
+            # Send both reply keyboard and inline button
+            await message.bot.send_message(
+                user_id,
+                msg_text,
+                parse_mode="Markdown",
+                reply_markup=get_done_inline_keyboard()
+            )
             started_count += 1
         except Exception as e:
             print(f"Failed to send start message to user {user_id}: {e}")
     
-    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
+    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «🟢 ✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
 
 
 @router.message(Command("stop_game"))
@@ -263,27 +281,25 @@ async def cmd_stop_game(message: types.Message):
 
 @router.callback_query(F.data == "confirm_stop_game")
 async def callback_confirm_stop_game(callback: types.CallbackQuery):
-    if callback.message.chat.id != ADMIN_GROUP_ID:
-        await callback.answer("Ця дія доступна лише в адмін-групі.", show_alert=True)
-        return
-    
     await db.stop_game_reset()
-    await callback.message.edit_text(
-        "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-        "Скинуто статус гри, звільнено зарезервовані номери команд та весь прогрес учасників.\n"
-        "(Маршрути станцій збережено).",
-        parse_mode="Markdown"
-    )
+    try:
+        await callback.message.edit_text(
+            "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
+            "Скинуто статус гри, звільнено зарезервовані номери команд та весь прогрес учасників.\n"
+            "(Маршрути станцій збережено).",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        await callback.message.answer("🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**")
     await callback.answer("Гру зупинено")
 
 
 @router.callback_query(F.data == "cancel_stop_game")
 async def callback_cancel_stop_game(callback: types.CallbackQuery):
-    if callback.message.chat.id != ADMIN_GROUP_ID:
-        await callback.answer("Ця дія доступна лише в адмін-групі.", show_alert=True)
-        return
-    
-    await callback.message.edit_text("❌ **Зупинення гри скасовано.**", parse_mode="Markdown")
+    try:
+        await callback.message.edit_text("❌ **Зупинення гри скасовано.**", parse_mode="Markdown")
+    except Exception:
+        await callback.message.answer("❌ **Зупинення гри скасовано.**")
     await callback.answer("Скасовано")
 
 
