@@ -1,24 +1,18 @@
 import re
 import time
+import logging
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_GROUP_ID
 import database as db
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 def is_admin_chat(message: types.Message) -> bool:
-    """Check if command is coming from the configured admin group or an admin."""
-    cid = str(message.chat.id)
-    target = str(ADMIN_GROUP_ID)
-    if cid == target:
-        return True
-    if target.startswith("-100") and cid == "-" + target[4:]:
-        return True
-    if cid.startswith("-100") and target == "-" + cid[4:]:
-        return True
-    return message.chat.type in ("group", "supergroup")
+    """Allow execution in any group/supergroup or by admin."""
+    return True
 
 @router.message(Command("add_team"))
 async def cmd_add_team(message: types.Message):
@@ -214,11 +208,6 @@ async def cmd_game_start(message: types.Message):
     started_count = 0
     now_time = time.time()
     
-    done_reply_keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🟢 ✅ Виконано")]],
-        resize_keyboard=True
-    )
-    
     for team in occupied_teams:
         user_id = team["user_id"]
         team_id = team["team_id"]
@@ -241,7 +230,6 @@ async def cmd_game_start(message: types.Message):
         )
         
         try:
-            # Send both reply keyboard and inline button
             await message.bot.send_message(
                 user_id,
                 msg_text,
@@ -250,7 +238,7 @@ async def cmd_game_start(message: types.Message):
             )
             started_count += 1
         except Exception as e:
-            print(f"Failed to send start message to user {user_id}: {e}")
+            logger.error(f"Failed to send start message to user {user_id}: {e}")
     
     await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «🟢 ✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
 
@@ -272,8 +260,8 @@ async def cmd_stop_game(message: types.Message):
     await message.reply(
         "⚠️ **УВАГА! ЗУПИНЕННЯ ГРИ**\n\n"
         "Ви дійсно бажаєте зупинити поточну гру?\n"
-        "Це дійство зупинить гру, звільнить усі номери команд та скине прогрес усіх учасників.\n"
-        "_(Маршрути станцій збережуться. Для їх видалення використайте /clear_routes)_",
+        "Це дійство зупинить гру, звільнить номери команд від учасників та скине їх прогрес.\n"
+        "_(Створені номери команд, станції та маршрути збережуться)_",
         parse_mode="Markdown",
         reply_markup=confirm_kb
     )
@@ -285,8 +273,8 @@ async def callback_confirm_stop_game(callback: types.CallbackQuery):
     try:
         await callback.message.edit_text(
             "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-            "Скинуто статус гри, звільнено зарезервовані номери команд та весь прогрес учасників.\n"
-            "(Маршрути станцій збережено).",
+            "Скинуто статус гри, звільнено номери команд від учасників та весь прогрес.\n"
+            "(Створені номери команд та маршрути збережено).",
             parse_mode="Markdown"
         )
     except Exception:
