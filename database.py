@@ -451,3 +451,27 @@ def _stop_game_reset_sync():
 async def stop_game_reset():
     await asyncio.to_thread(_stop_game_reset_sync)
 
+def _clear_routes_sync(team_id: Optional[str] = None) -> bool:
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        if team_id:
+            tid = team_id.strip()
+            if tid in db["routes"]:
+                del db["routes"][tid]
+        else:
+            db["routes"] = {}
+        _save_json_db(db)
+        return True
+
+    with _get_connection() as conn:
+        if team_id:
+            conn.execute("DELETE FROM routes WHERE team_id = ?", (team_id.strip(),))
+        else:
+            conn.execute("DELETE FROM routes")
+        conn.commit()
+        return True
+
+async def clear_routes(team_id: Optional[str] = None) -> bool:
+    return await asyncio.to_thread(_clear_routes_sync, team_id)
+
+

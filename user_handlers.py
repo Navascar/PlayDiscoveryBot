@@ -9,7 +9,7 @@ router = Router()
 
 def get_done_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Виконано")]],
+        keyboard=[[KeyboardButton(text="✅ Виконано")]],
         resize_keyboard=True
     )
 
@@ -57,7 +57,7 @@ async def cmd_start(message: types.Message):
                     
                     await message.reply(
                         f"📍 Ваше поточне завдання: **{st_name}**\n\n"
-                        f"Після виконання натисніть кнопку **«Виконано»**.",
+                        f"Після виконання натисніть кнопку **«✅ Виконано»**.",
                         parse_mode="Markdown",
                         reply_markup=get_done_keyboard()
                     )
@@ -99,7 +99,7 @@ async def process_team_registration(message: types.Message, team_id: str):
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
                     f"📍 Ваше перше завдання: **{st_name}**\n\n"
                     f"⏱️ На виконання відводиться 5 хвилин.\n"
-                    f"Після завершення натисніть кнопку **«Виконано»** нижче.",
+                    f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
                     parse_mode="Markdown",
                     reply_markup=get_done_keyboard()
                 )
@@ -125,7 +125,7 @@ async def process_team_registration(message: types.Message, team_id: str):
         await message.reply(f"⚠️ Ви вже зареєстровані за командою **№{team_num}**.", parse_mode="Markdown")
 
 
-@router.message(F.chat.type == "private", F.text == "Виконано")
+@router.message(F.chat.type == "private", F.text.in_({"✅ Виконано", "Виконано"}))
 async def handle_done_button(message: types.Message):
     user_id = message.from_user.id
     progress = await db.get_user_progress(user_id)
@@ -243,7 +243,7 @@ async def handle_private_text(message: types.Message):
         # User is already registered and typed something else
         if progress and progress["status"] == "in_progress":
             await message.reply(
-                "Для підтвердження проходження натисніть кнопку **«Виконано»** під полем вводу.",
+                "Для підтвердження проходження натисніть кнопку **«✅ Виконано»** під полем вводу.",
                 parse_mode="Markdown",
                 reply_markup=get_done_keyboard()
             )

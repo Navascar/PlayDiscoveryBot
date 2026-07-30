@@ -2,7 +2,7 @@ import re
 import time
 from aiogram import Router, types, F
 from aiogram.filters import Command
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_GROUP_ID
 import database as db
 
@@ -84,6 +84,21 @@ async def cmd_clear_station(message: types.Message):
         await message.reply(f"🗑️ Станцію **{station_id}** успішно видалено з системи та маршрутів.", parse_mode="Markdown")
     else:
         await message.reply(f"❌ Станцію **{station_id}** не знайдено.", parse_mode="Markdown")
+
+
+@router.message(Command("clear_routes"))
+async def cmd_clear_routes(message: types.Message):
+    if not is_admin_chat(message):
+        return
+    
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1:
+        team_id = args[1].strip()
+        await db.clear_routes(team_id)
+        await message.reply(f"🗑️ Маршрут для команди **№{team_id}** успішно видалено.", parse_mode="Markdown")
+    else:
+        await db.clear_routes()
+        await message.reply("🗑️ Маршрути для **всіх** команд успішно видалено.", parse_mode="Markdown")
 
 
 @router.message(Command("name_station"))
@@ -187,7 +202,7 @@ async def cmd_game_start(message: types.Message):
     now_time = time.time()
     
     done_keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Виконано")]],
+        keyboard=[[KeyboardButton(text="✅ Виконано")]],
         resize_keyboard=True
     )
     
@@ -210,7 +225,7 @@ async def cmd_game_start(message: types.Message):
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
             f"📍 Перше завдання: **{st_name}**\n\n"
             f"⏱️ На виконання відводиться 5 хвилин.\n"
-            f"Після завершення натисніть кнопку **«Виконано»** нижче."
+            f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
         )
         
         try:
@@ -219,7 +234,7 @@ async def cmd_game_start(message: types.Message):
         except Exception as e:
             print(f"Failed to send start message to user {user_id}: {e}")
     
-    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
+    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
 
 
 @router.message(Command("stop_game"))
@@ -227,22 +242,49 @@ async def cmd_stop_game(message: types.Message):
     if not is_admin_chat(message):
         return
     
-    args = message.text.split(maxsplit=1)
-    if len(args) > 1 and args[1].strip().lower() in ("confirm", "підтверджую", "yes"):
-        await db.stop_game_reset()
-        await message.reply(
-            "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-            "Скинуто статус гри, реєстрації всіх команд та весь прогрес учасників.",
-            parse_mode="Markdown"
-        )
-    else:
-        await message.reply(
-            "⚠️ **УВАГА! ЗУПИНЕННЯ ГРИ**\n\n"
-            "Ви дійсно бажаєте зупинити поточну гру?\n"
-            "Це дійство зупинить гру, звільнить усі зарезервовані номери команд та скине прогрес учасників.\n\n"
-            "Для підтвердження надішліть команду:\n`/stop_game confirm`",
-            parse_mode="Markdown"
-        )
+    confirm_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🛑 Так, зупинити гру", callback_data="confirm_stop_game"),
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_stop_game")
+            ]
+        ]
+    )
+    
+    await message.reply(
+        "⚠️ **УВАГА! ЗУПИНЕННЯ ГРИ**\n\n"
+        "Ви дійсно бажаєте зупинити поточну гру?\n"
+        "Це дійство зупинить гру, звільнить усі номери команд та скине прогрес усіх учасників.\n"
+        "_(Маршрути станцій збережуться. Для їх видалення використайте /clear_routes)_",
+        parse_mode="Markdown",
+        reply_markup=confirm_kb
+    )
+
+
+@router.callback_query(F.data == "confirm_stop_game")
+async def callback_confirm_stop_game(callback: types.CallbackQuery):
+    if callback.message.chat.id != ADMIN_GROUP_ID:
+        await callback.answer("Ця дія доступна лише в адмін-групі.", show_alert=True)
+        return
+    
+    await db.stop_game_reset()
+    await callback.message.edit_text(
+        "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
+        "Скинуто статус гри, звільнено зарезервовані номери команд та весь прогрес учасників.\n"
+        "(Маршрути станцій збережено).",
+        parse_mode="Markdown"
+    )
+    await callback.answer("Гру зупинено")
+
+
+@router.callback_query(F.data == "cancel_stop_game")
+async def callback_cancel_stop_game(callback: types.CallbackQuery):
+    if callback.message.chat.id != ADMIN_GROUP_ID:
+        await callback.answer("Ця дія доступна лише в адмін-групі.", show_alert=True)
+        return
+    
+    await callback.message.edit_text("❌ **Зупинення гри скасовано.**", parse_mode="Markdown")
+    await callback.answer("Скасовано")
 
 
 @router.message(Command("status"))
@@ -286,11 +328,12 @@ async def cmd_commands(message: types.Message):
         "• `/add_team (Номер)` — Додати новий номер команди\n"
         "• `/add_station (Номер) [Назва]` — Додати номер станції\n"
         "• `/clear_team (Номер)` — Видалити у власника номер групи (звільнити команду)\n"
-        "• `/clear_station (Номер)` — Видалити станцію з системи та маршрутів\n"
+        "• `/clear_station (Номер)` — Видалити станцію з системи\n"
         "• `/name_station (Номер) (Назва)` — Встановити назву станції\n"
-        "• `/add_route (Номер команди)` — Застосувати **у відповідь (reply)** на повідомлення зі списком станцій\n"
+        "• `/add_route (Номер команди)` — Застосувати **у відповідь** на список станцій\n"
+        "• `/clear_routes [Номер]` — Видалити маршрут команди (або всі маршрути)\n"
         "• `/game_start` — Почати гру та розіслати перші станції учасникам\n"
-        "• `/stop_game` — Зупинити гру та скинути весь прогрес команд\n"
+        "• `/stop_game` — Зупинити гру та скинути прогрес (підтвердження кнопкою)\n"
         "• `/final_word (Слово)` — Встановити фінальне ключове слово\n"
         "• `/status` — Переглянути статус гри, створених команд та станцій\n"
         "• `/comands` — Переглянути цей список команд"
