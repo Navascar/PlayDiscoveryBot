@@ -13,5 +13,8 @@ ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "-1001234567890"))
 # Station duration timer in seconds (5 minutes = 300 seconds)
 STATION_COOLDOWN_SECONDS = int(os.getenv("STATION_COOLDOWN_SECONDS", "300"))
 
-# Database path
-DB_PATH = os.getenv("DB_PATH", "bot_data.db")
+# Database path (On Vercel serverless, only /tmp directory is writable)
+if os.getenv("VERCEL"):
+    DB_PATH = os.getenv("DB_PATH", "/tmp/bot_data.db")
+else:
+    DB_PATH = os.getenv("DB_PATH", "bot_data.db")
