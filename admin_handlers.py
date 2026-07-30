@@ -253,3 +253,25 @@ async def cmd_status(message: types.Message):
             status_text += f"• Команда **№{t['team_id']}**: {user_str} | Маршрут: `{route_str}`\n"
     
     await message.reply(status_text, parse_mode="Markdown")
+
+
+@router.message(Command("comands", "commands", "help"))
+async def cmd_commands(message: types.Message):
+    if not is_admin_chat(message):
+        return
+    
+    help_text = (
+        "📜 **СПИСОК КОМАНД ДЛЯ АДМІН-ГРУПИ:**\n\n"
+        "• `/add_team (Номер)` — Додати новий номер команди\n"
+        "• `/add_station (Номер) [Назва]` — Додати номер станції\n"
+        "• `/clear_team (Номер)` — Видалити у власника номер групи (звільнити команду)\n"
+        "• `/clear_station (Номер)` — Видалити станцію з системи та маршрутів\n"
+        "• `/name_station (Номер) (Назва)` — Встановити назву станції\n"
+        "• `/add_route (Номер команди)` — Застосувати **у відповідь (reply)** на повідомлення зі списком станцій\n"
+        "• `/game_start` — Почати гру та розіслати перші станції учасникам\n"
+        "• `/final_word (Слово)` — Встановити фінальне ключове слово\n"
+        "• `/status` — Переглянути статус гри, створених команд та станцій\n"
+        "• `/comands` — Переглянути цей список команд"
+    )
+    await message.reply(help_text, parse_mode="Markdown")
+
