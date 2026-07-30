@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import requests
 from flask import Flask, request, jsonify
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
@@ -10,20 +12,28 @@ import database as db
 import admin_handlers
 import user_handlers
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
-)
+def get_bot() -> Bot:
+    if not BOT_TOKEN or "YOUR_BOT_TOKEN" in BOT_TOKEN:
+        raise ValueError("BOT_TOKEN is not configured in Vercel Environment Variables.")
+    return Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
+    )
+
 dp = Dispatcher()
 dp.include_router(admin_handlers.router)
 dp.include_router(user_handlers.router)
 
 _db_initialized = False
 
-async def handle_update(update_dict):
+async def process_telegram_update(update_dict):
     global _db_initialized
+    bot = get_bot()
     if not _db_initialized:
         await db.init_db()
         _db_initialized = True
@@ -33,17 +43,54 @@ async def handle_update(update_dict):
 
 @app.route("/", methods=["GET", "POST"])
 @app.route("/api/index", methods=["GET", "POST"])
-def webhook():
+def main_handler():
     if request.method == "POST":
         try:
             update_dict = request.get_json(force=True)
             if update_dict:
-                asyncio.run(handle_update(update_dict))
+                asyncio.run(process_telegram_update(update_dict))
             return jsonify({"status": "ok"}), 200
         except Exception as e:
+            logger.error(f"Webhook error: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
     
-    return "Telegram Quest Guide Bot is running via Vercel Webhook!", 200
+    # GET Request: Webhook setup page
+    host_url = request.host_url.rstrip("/")
+    webhook_target = f"{host_url}/api/index"
+    
+    token_valid = bool(BOT_TOKEN and "YOUR_BOT_TOKEN" not in BOT_TOKEN)
+    
+    if not token_valid:
+        return (
+            "<h2>⚠️ Telegram Quest Guide Bot</h2>"
+            "<p>Будь ласка, вкажіть змінні оточення <b>BOT_TOKEN</b> та <b>ADMIN_GROUP_ID</b> у налаштуваннях Vercel (Settings -> Environment Variables)!</p>",
+            200
+        )
+    
+    # Auto-register webhook when requested via button or query param
+    if "set_webhook" in request.args:
+        try:
+            tg_res = requests.get(f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={webhook_target}").json()
+            return jsonify(tg_res)
+        except Exception as err:
+            return jsonify({"error": str(err)}), 500
+    
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head><title>Telegram Quest Bot - Vercel</title></head>
+    <body style="font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; border: 1px solid #eaeaea; border-radius: 10px;">
+        <h2>✅ Telegram Quest Guide Bot is Active on Vercel!</h2>
+        <p>Ваш Webhook URL: <code>{webhook_target}</code></p>
+        <p>Для того щоб бот почав реагувати на команди у Telegram, необхідно один раз активувати Webhook:</p>
+        <p style="margin-top: 25px;">
+            <a href="/?set_webhook=1" style="background:#0070f3; color:white; padding:12px 20px; text-decoration:none; border-radius:6px; font-weight:bold;">
+                👉 Натисніть тут для активації Webhook
+            </a>
+        </p>
+    </body>
+    </html>
+    """, 200
 
 # Vercel entrypoint handler
 handler = app
