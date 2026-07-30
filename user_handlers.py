@@ -41,22 +41,22 @@ async def cmd_start(message: types.Message):
         
         if progress:
             if progress["status"] == "waiting_final_word":
-                await message.reply("🎉 Ви пройшли всі станції!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
+                await message.reply("🎉 Ви пройшли всі завдання!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
                 return
             elif progress["status"] == "completed":
                 await message.reply("🏆 Ви успішно завершили квест! Дякуємо за участь!", reply_markup=ReplyKeyboardRemove())
                 return
             else:
-                # Send current station
+                # Send current station/task
                 route = await db.get_route(team_id)
                 curr_idx = progress["current_index"]
                 if route and curr_idx < len(route):
                     st_id = route[curr_idx]["station_id"]
                     st_info = await db.get_station(st_id)
-                    st_name = st_info["name"] if st_info and st_info["name"] else f"Станція №{st_id}"
+                    st_name = st_info["name"] if st_info and st_info["name"] else st_id
                     
                     await message.reply(
-                        f"📍 Ваша поточна станція (№{st_id}): **{st_name}**\n\n"
+                        f"📍 Ваше поточне завдання: **{st_name}**\n\n"
                         f"Після виконання натисніть кнопку **«Виконано»**.",
                         parse_mode="Markdown",
                         reply_markup=get_done_keyboard()
@@ -93,12 +93,12 @@ async def process_team_registration(message: types.Message, team_id: str):
             if route:
                 first_st = route[0]["station_id"]
                 st_info = await db.get_station(first_st)
-                st_name = st_info["name"] if st_info and st_info["name"] else f"Станція №{first_st}"
+                st_name = st_info["name"] if st_info and st_info["name"] else first_st
                 
                 await message.reply(
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
-                    f"📍 Ваша перша станція (№{first_st}): **{st_name}**\n\n"
-                    f"⏱️ На виконання станції відводиться 5 хвилин.\n"
+                    f"📍 Ваше перше завдання: **{st_name}**\n\n"
+                    f"⏱️ На виконання відводиться 5 хвилин.\n"
                     f"Після завершення натисніть кнопку **«Виконано»** нижче.",
                     parse_mode="Markdown",
                     reply_markup=get_done_keyboard()
@@ -135,7 +135,7 @@ async def handle_done_button(message: types.Message):
         return
     
     if progress["status"] == "waiting_final_word":
-        await message.reply("🎉 Ви вже пройшли всі станції!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
+        await message.reply("🎉 Ви вже пройшли всі завдання!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
         return
     elif progress["status"] == "completed":
         await message.reply("🏆 Ви вже успішно завершили квест!", reply_markup=ReplyKeyboardRemove())
@@ -152,7 +152,7 @@ async def handle_done_button(message: types.Message):
         secs = remaining % 60
         
         await message.reply(
-            f"⏳ Не пройшло 5 хвилин, які відводяться на виконання станції.\n"
+            f"⏳ Не минуло 5 хвилин, які відводяться на виконання.\n"
             f"Залишилось: **{mins} хв. {secs} сек.**",
             parse_mode="Markdown"
         )
@@ -163,7 +163,7 @@ async def handle_done_button(message: types.Message):
     route = await db.get_route(team_id)
     
     if not route:
-        await message.reply("⚠️ У вашої команди відсутній маршрут станцій. Зверніться до адмінів.", parse_mode="Markdown")
+        await message.reply("⚠️ У вашої команди відсутній маршрут. Зверніться до адмінів.", parse_mode="Markdown")
         return
     
     curr_index = progress["current_index"]
@@ -175,11 +175,11 @@ async def handle_done_button(message: types.Message):
         
         next_st_id = route[next_index]["station_id"]
         st_info = await db.get_station(next_st_id)
-        st_name = st_info["name"] if st_info and st_info["name"] else f"Станція №{next_st_id}"
+        st_name = st_info["name"] if st_info and st_info["name"] else next_st_id
         
         await message.reply(
-            f"✅ Станцію виконано!\n\n"
-            f"📍 Наступна станція (№{next_st_id}): **{st_name}**\n\n"
+            f"✅ Виконано!\n\n"
+            f"📍 Наступне завдання: **{st_name}**\n\n"
             f"⏱️ У вас є 5 хвилин на виконання.",
             parse_mode="Markdown",
             reply_markup=get_done_keyboard()
@@ -188,7 +188,7 @@ async def handle_done_button(message: types.Message):
         # Reached the end of all stations!
         await db.set_user_status(user_id, "waiting_final_word")
         await message.reply(
-            "🎉 **Вітаємо! Ви пройшли всі станції.**\n\n"
+            "🎉 **Вітаємо! Ви пройшли всі завдання.**\n\n"
             "Введіть фінальне повідомлення:",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardRemove()
@@ -214,7 +214,7 @@ async def handle_private_text(message: types.Message):
             await db.set_user_status(user_id, "completed")
             await message.reply(
                 "🏆 **Вітаємо! Ключове слово вірне.**\n"
-                "Ви успішно пройшли всі станції та завершили квест! 🥳",
+                "Ви успішно пройшли всі завдання та завершили квест! 🥳",
                 parse_mode="Markdown",
                 reply_markup=ReplyKeyboardRemove()
             )
@@ -223,7 +223,7 @@ async def handle_private_text(message: types.Message):
             team_id = progress["team_id"]
             user_mention = message.from_user.mention_html(message.from_user.full_name)
             admin_msg = (
-                f"🎉 **Команда №{team_id}** (Учасник: {user_mention}) успішно пройшла всі станції "
+                f"🎉 **Команда №{team_id}** (Учасник: {user_mention}) успішно пройшла всі завдання "
                 f"та правильно ввела фінальне слово: <b>{final_word}</b>! 🏆"
             )
             try:
@@ -243,7 +243,7 @@ async def handle_private_text(message: types.Message):
         # User is already registered and typed something else
         if progress and progress["status"] == "in_progress":
             await message.reply(
-                "Для підтвердження проходження станції натисніть кнопку **«Виконано»** під полем вводу.",
+                "Для підтвердження проходження натисніть кнопку **«Виконано»** під полем вводу.",
                 parse_mode="Markdown",
                 reply_markup=get_done_keyboard()
             )

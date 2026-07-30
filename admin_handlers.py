@@ -45,9 +45,9 @@ async def cmd_add_station(message: types.Message):
     
     await db.add_station(station_id, name)
     if name:
-        await message.reply(f"✅ Станцію **№{station_id}** додано з назвою: **{name}**", parse_mode="Markdown")
+        await message.reply(f"✅ Станцію **{station_id}** додано з назвою: **{name}**", parse_mode="Markdown")
     else:
-        await message.reply(f"✅ Станцію **№{station_id}** додано. (Ви можете назвати її через `/name_station {station_id} Назва`)", parse_mode="Markdown")
+        await message.reply(f"✅ Станцію **{station_id}** додано. (Ви можете назвати її через `/name_station {station_id} Назва`)", parse_mode="Markdown")
 
 
 @router.message(Command("clear_team"))
@@ -81,9 +81,9 @@ async def cmd_clear_station(message: types.Message):
     station_id = args[1].strip()
     success = await db.clear_station(station_id)
     if success:
-        await message.reply(f"🗑️ Станцію **№{station_id}** успішно видалено з системи та маршрутів.", parse_mode="Markdown")
+        await message.reply(f"🗑️ Станцію **{station_id}** успішно видалено з системи та маршрутів.", parse_mode="Markdown")
     else:
-        await message.reply(f"❌ Станцію **№{station_id}** не знайдено.", parse_mode="Markdown")
+        await message.reply(f"❌ Станцію **{station_id}** не знайдено.", parse_mode="Markdown")
 
 
 @router.message(Command("name_station"))
@@ -112,7 +112,7 @@ async def cmd_name_station(message: types.Message):
         return
     
     await db.name_station(station_id, name)
-    await message.reply(f"✏️ Назву для станції **№{station_id}** встановлено: **{name}**", parse_mode="Markdown")
+    await message.reply(f"✏️ Назву для станції **{station_id}** встановлено: **{name}**", parse_mode="Markdown")
 
 
 @router.message(Command("add_route"))
@@ -132,8 +132,6 @@ async def cmd_add_route(message: types.Message):
         return
     
     route_text = message.reply_to_message.text
-    # Extract station numbers/names from text
-    # Split by newlines, commas, or spaces
     raw_items = re.split(r'[\n,]+', route_text)
     station_ids = [item.strip() for item in raw_items if item.strip()]
     
@@ -148,7 +146,7 @@ async def cmd_add_route(message: types.Message):
     
     success = await db.set_route(team_id, station_ids)
     if success:
-        formatted_list = " ➔ ".join([f"Станція №{sid}" for sid in station_ids])
+        formatted_list = " ➔ ".join([sid for sid in station_ids])
         await message.reply(f"📍 Маршрут для команди **№{team_id}** успішно збережено!\nПослідовність: {formatted_list}", parse_mode="Markdown")
     else:
         await message.reply(f"❌ Помилка збереження маршруту для команди **№{team_id}**.", parse_mode="Markdown")
@@ -206,12 +204,12 @@ async def cmd_game_start(message: types.Message):
         
         first_station = route[0]
         st_info = await db.get_station(first_station["station_id"])
-        st_name = (st_info["name"] if st_info and st_info["name"] else f"Станція №{first_station['station_id']}")
+        st_name = st_info["name"] if st_info and st_info["name"] else first_station["station_id"]
         
         msg_text = (
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
-            f"📍 Ваша перша станція (№{first_station['station_id']}): **{st_name}**\n\n"
-            f"⏱️ На виконання станції відводиться не менше 5 хвилин.\n"
+            f"📍 Перше завдання: **{st_name}**\n\n"
+            f"⏱️ На виконання відводиться 5 хвилин.\n"
             f"Після завершення натисніть кнопку **«Виконано»** нижче."
         )
         
@@ -221,7 +219,30 @@ async def cmd_game_start(message: types.Message):
         except Exception as e:
             print(f"Failed to send start message to user {user_id}: {e}")
     
-    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nСтартову станцію та кнопку «Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
+    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
+
+
+@router.message(Command("stop_game"))
+async def cmd_stop_game(message: types.Message):
+    if not is_admin_chat(message):
+        return
+    
+    args = message.text.split(maxsplit=1)
+    if len(args) > 1 and args[1].strip().lower() in ("confirm", "підтверджую", "yes"):
+        await db.stop_game_reset()
+        await message.reply(
+            "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
+            "Скинуто статус гри, реєстрації всіх команд та весь прогрес учасників.",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.reply(
+            "⚠️ **УВАГА! ЗУПИНЕННЯ ГРИ**\n\n"
+            "Ви дійсно бажаєте зупинити поточну гру?\n"
+            "Це дійство зупинить гру, звільнить усі зарезервовані номери команд та скине прогрес учасників.\n\n"
+            "Для підтвердження надішліть команду:\n`/stop_game confirm`",
+            parse_mode="Markdown"
+        )
 
 
 @router.message(Command("status"))
@@ -269,9 +290,9 @@ async def cmd_commands(message: types.Message):
         "• `/name_station (Номер) (Назва)` — Встановити назву станції\n"
         "• `/add_route (Номер команди)` — Застосувати **у відповідь (reply)** на повідомлення зі списком станцій\n"
         "• `/game_start` — Почати гру та розіслати перші станції учасникам\n"
+        "• `/stop_game` — Зупинити гру та скинути весь прогрес команд\n"
         "• `/final_word (Слово)` — Встановити фінальне ключове слово\n"
         "• `/status` — Переглянути статус гри, створених команд та станцій\n"
         "• `/comands` — Переглянути цей список команд"
     )
     await message.reply(help_text, parse_mode="Markdown")
-

@@ -430,3 +430,24 @@ def _set_user_status_sync(user_id: int, status: str):
 
 async def set_user_status(user_id: int, status: str):
     await asyncio.to_thread(_set_user_status_sync, user_id, status)
+
+def _stop_game_reset_sync():
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        db["settings"]["game_started"] = "0"
+        db["user_progress"] = {}
+        for tid in db["teams"]:
+            db["teams"][tid]["user_id"] = None
+            db["teams"][tid]["username"] = None
+            db["teams"][tid]["full_name"] = None
+        _save_json_db(db)
+        return
+    with _get_connection() as conn:
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('game_started', '0')")
+        conn.execute("DELETE FROM user_progress")
+        conn.execute("UPDATE teams SET user_id = NULL, username = NULL, full_name = NULL")
+        conn.commit()
+
+async def stop_game_reset():
+    await asyncio.to_thread(_stop_game_reset_sync)
+
