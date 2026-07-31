@@ -122,6 +122,27 @@ async def run_tests():
     assert len(restored_teams) >= 4
     print("14. Cold start restoration from JSON backup to SQLite verified.")
     
+    # 11. Test Secret /skip Command
+    await db.set_route("101", ["1", "2", "3"])
+    await db.init_user_progress(12345678, "101", time.time())
+    skip_res = await db.force_skip_user_station(12345678)
+    assert skip_res is not None
+    assert skip_res["status"] == "in_progress"
+    assert skip_res["next_station_id"] == "2"
+    print("15. Secret /skip command station skip verified.")
+    
+    # 12. Test Keyword Attempts & Leaderboard Placement
+    att1 = await db.increment_keyword_attempts(12345678)
+    att2 = await db.increment_keyword_attempts(12345678)
+    assert att2 == 2
+    comp_res = await db.complete_user_quest(12345678)
+    assert comp_res["finish_order"] == 1
+    assert comp_res["keyword_attempts"] == 2
+    leaderboard = await db.get_leaderboard()
+    assert len(leaderboard) == 1
+    assert leaderboard[0]["finish_order"] == 1
+    print("16. Leaderboard ranking and keyword attempt counter verified.")
+    
     # Cleanup DB & JSON backup created for tests
     try:
         if os.path.exists(DB_PATH):

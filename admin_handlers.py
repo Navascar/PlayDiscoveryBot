@@ -221,9 +221,17 @@ async def cmd_game_start(message: types.Message):
         st_info = await db.get_station(first_station["station_id"])
         st_name = st_info["name"] if st_info and st_info["name"] else first_station["station_id"]
         
+        route_items = []
+        for item in route:
+            st = await db.get_station(item["station_id"])
+            sname = st["name"] if st and st.get("name") else item["station_id"]
+            route_items.append(sname)
+        formatted_route = " ➔ ".join(route_items)
+        
         msg_text = (
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
-            f"📍 Перше завдання: **{st_name}**\n\n"
+            f"📍 **Ваш маршрут:** {formatted_route}\n\n"
+            f"🎯 Перше завдання: **{st_name}**\n\n"
             f"⏱️ На виконання відводиться 5 хвилин.\n"
             f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
         )
@@ -274,11 +282,24 @@ async def cmd_stop_game(message: types.Message):
 
 @router.callback_query(F.data == "confirm_stop_game")
 async def callback_confirm_stop_game(callback: types.CallbackQuery):
+    teams = await db.get_teams()
+    for t in teams:
+        if t.get("user_id"):
+            try:
+                await callback.bot.send_message(
+                    t["user_id"],
+                    "🛑 **ГРУ ЗАВЕРШЕНО ОРГАНІЗАТОРАМИ.**\n\nДякуємо всім за участь у квесті! 🏁",
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            except Exception:
+                pass
+
     await db.stop_game_reset(clear_participants=False)
     try:
         await callback.message.edit_text(
             "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-            "Скинуто статус гри та прогрес учасників.\n"
+            "Скинуто статус гри та прогрес учасників. Учасникам надіслано сповіщення про завершення гри.\n"
             "Створені номери команд, їх реєстрації та маршрути збережено.",
             parse_mode="Markdown"
         )
@@ -289,11 +310,24 @@ async def callback_confirm_stop_game(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "confirm_stop_game_clear")
 async def callback_confirm_stop_game_clear(callback: types.CallbackQuery):
+    teams = await db.get_teams()
+    for t in teams:
+        if t.get("user_id"):
+            try:
+                await callback.bot.send_message(
+                    t["user_id"],
+                    "🛑 **ГРУ ЗАВЕРШЕНО ОРГАНІЗАТОРАМИ.**\n\nДякуємо всім за участь у квесті! 🏁",
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+            except Exception:
+                pass
+
     await db.stop_game_reset(clear_participants=True)
     try:
         await callback.message.edit_text(
             "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-            "Скинуто статус гри, прогрес та звільнено номери команд від учасників.\n"
+            "Скинуто статус гри, прогрес та звільнено номери команд від учасників. Учасникам надіслано сповіщення про завершення гри.\n"
             "Створені номери команд, станції та маршрути збережено.",
             parse_mode="Markdown"
         )
@@ -338,6 +372,17 @@ async def cmd_status(message: types.Message):
             route = await db.get_route(t['team_id'])
             route_str = " -> ".join([r['station_id'] for r in route]) if route else "Немає маршруту"
             status_text += f"• Команда **№{t['team_id']}**: {user_str} | Маршрут: `{route_str}`\n"
+    
+    leaderboard = await db.get_leaderboard()
+    if leaderboard:
+        status_text += "\n🏆 **Підсумковий рейтинг фінішувавших:**\n"
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        for item in leaderboard:
+            place = item.get("finish_order", "?")
+            team_id = item.get("team_id", "?")
+            attempts = item.get("keyword_attempts", 1)
+            medal = medals.get(place, "🎖️")
+            status_text += f"{medal} **{place}-е місце**: Команда **№{team_id}** (спроб вводу: `{attempts}`)\n"
     
     await message.reply(status_text, parse_mode="Markdown")
 

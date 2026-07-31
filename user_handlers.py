@@ -102,9 +102,17 @@ async def process_team_registration(message: types.Message, team_id: str):
                 st_info = await db.get_station(first_st)
                 st_name = st_info["name"] if st_info and st_info["name"] else first_st
                 
+                route_items = []
+                for item in route:
+                    st = await db.get_station(item["station_id"])
+                    sname = st["name"] if st and st.get("name") else item["station_id"]
+                    route_items.append(sname)
+                formatted_route = " ➔ ".join(route_items)
+                
                 await message.reply(
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
-                    f"📍 Ваше перше завдання: **{st_name}**\n\n"
+                    f"📍 **Ваш маршрут:** {formatted_route}\n\n"
+                    f"🎯 Ваше перше завдання: **{st_name}**\n\n"
                     f"⏱️ На виконання відводиться 5 хвилин.\n"
                     f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
                     parse_mode="Markdown",
@@ -218,6 +226,59 @@ async def callback_done_station(callback: types.CallbackQuery):
     )
 
 
+@router.message(F.chat.type == "private", Command("skip"))
+async def cmd_skip_station(message: types.Message):
+    user_id = message.from_user.id
+    
+    # Check if admin
+    try:
+        member = await message.bot.get_chat_member(ADMIN_GROUP_ID, user_id)
+        is_admin = member.status in ("creator", "administrator", "member")
+    except Exception:
+        is_admin = True
+    
+    if not is_admin:
+        return
+    
+    args = message.text.split(maxsplit=1)
+    target = args[1].strip() if len(args) > 1 else user_id
+    
+    res = await db.force_skip_user_station(target)
+    if not res:
+        await message.reply("⚠️ Не вдалося пропустити станцію. Перевірте, чи гра триває та чи є активне завдання.", parse_mode="Markdown")
+        return
+    
+    target_uid = res["user_id"]
+    team_id = res["team_id"]
+    
+    if res["status"] == "in_progress":
+        st_name = res["next_station_name"]
+        await message.reply(f"⏩ Станцію для команди **№{team_id}** успішно пропущено!", parse_mode="Markdown")
+        try:
+            await message.bot.send_message(
+                target_uid,
+                f"⏩ **Організатори пропустили станцію!**\n\n"
+                f"📍 Наступне завдання: **{st_name}**\n\n"
+                f"⏱️ У вас є 5 хвилин на виконання.",
+                parse_mode="Markdown",
+                reply_markup=get_done_inline_keyboard()
+            )
+        except Exception as e:
+            print(f"Failed to notify user on skip: {e}")
+    elif res["status"] == "waiting_final_word":
+        await message.reply(f"⏩ Станцію для команди **№{team_id}** успішно пропущено! Команда перейшла до фінального слова.", parse_mode="Markdown")
+        try:
+            await message.bot.send_message(
+                target_uid,
+                "🎉 **Вітаємо! Всі станції пройдено.**\n\n"
+                "Введіть фінальне повідомлення:",
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove()
+            )
+        except Exception as e:
+            print(f"Failed to notify user on skip: {e}")
+
+
 @router.message(F.chat.type == "private", F.text.in_({"🟢 ✅ Виконано", "✅ Виконано", "Виконано"}))
 async def handle_done_button(message: types.Message):
     await check_and_advance_station(
@@ -243,10 +304,18 @@ async def handle_private_text(message: types.Message):
             return
         
         if text.casefold() == final_word.strip().casefold():
-            await db.set_user_status(user_id, "completed")
+            completion = await db.complete_user_quest(user_id)
+            place = completion.get("finish_order", 1)
+            attempts = completion.get("keyword_attempts", 1)
+            
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            medal = medals.get(place, "🎖️")
+            
             await message.reply(
-                "🏆 **Вітаємо! Ключове слово вірне.**\n"
-                "Ви успішно пройшли всі завдання та завершили квест! 🥳",
+                f"🏆 **Вітаємо! Ключове слово вірне.**\n\n"
+                f"{medal} Ви посіли **{place}-е місце** у квесті!\n"
+                f"📊 Кількість спроб вводу: **{attempts}**\n\n"
+                f"Ви успішно пройшли всі завдання та завершили квест! 🥳",
                 parse_mode="Markdown",
                 reply_markup=ReplyKeyboardRemove()
             )
@@ -255,15 +324,56 @@ async def handle_private_text(message: types.Message):
             team_id = progress["team_id"]
             user_mention = message.from_user.mention_html(message.from_user.full_name)
             admin_msg = (
-                f"🎉 **Команда №{team_id}** (Учасник: {user_mention}) успішно пройшла всі завдання "
-                f"та правильно ввела фінальне слово: <b>{final_word}</b>! 🏆"
-            )
+                f"🎉 <b>Команда №{team_id}</b> (Учасник: {user_mention}) фінішувала!<br>"
+                f"🏆 <b>Місце: {place}</b> ({medal})<br>"
+                f"🔑 Фінальне слово: <b>{final_word}</b><br>"
+                f"📊 Кількість спроб вводу: <b>{attempts}</b>"
+            ).replace("<br>", "\n")
+            
             try:
                 await message.bot.send_message(ADMIN_GROUP_ID, admin_msg, parse_mode="HTML")
             except Exception as e:
                 print(f"Failed to notify admin group: {e}")
+                
+            # Check if all active registered teams have completed
+            all_done = await db.check_all_teams_completed()
+            if all_done:
+                await db.set_setting("game_started", "0")
+                leaderboard = await db.get_leaderboard()
+                
+                lb_text = "🏁 **КВЕСТ ОФІЦІЙНО ЗАВЕРШЕНО!**\nВсі команди пройшли свої маршрути!\n\n🏆 **ПІДСУМКОВИЙ ТУРНІРНИЙ СПИСОК:**\n"
+                for item in leaderboard:
+                    p = item.get("finish_order", "?")
+                    tid = item.get("team_id", "?")
+                    att = item.get("keyword_attempts", 1)
+                    m = medals.get(p, "🎖️")
+                    lb_text += f"{m} **{p}-е місце**: Команда **№{tid}** (спроб: `{att}`)\n"
+                
+                # Broadcast to all registered participants
+                teams = await db.get_teams()
+                for t in teams:
+                    if t.get("user_id"):
+                        try:
+                            await message.bot.send_message(
+                                t["user_id"],
+                                lb_text,
+                                parse_mode="Markdown",
+                                reply_markup=ReplyKeyboardRemove()
+                            )
+                        except Exception:
+                            pass
+                
+                # Notify admin group
+                try:
+                    await message.bot.send_message(ADMIN_GROUP_ID, lb_text, parse_mode="Markdown")
+                except Exception:
+                    pass
         else:
-            await message.reply("❌ Невірне ключове слово. Спробуйте ще раз:", reply_markup=ReplyKeyboardRemove())
+            attempts = await db.increment_keyword_attempts(user_id)
+            await message.reply(
+                f"❌ Невірне ключове слово (Спроба №{attempts}). Спробуйте ще раз:",
+                reply_markup=ReplyKeyboardRemove()
+            )
         return
 
     # Check if participant is attempting team registration

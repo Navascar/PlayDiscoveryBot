@@ -105,7 +105,17 @@ def _init_db_sync():
         cursor.execute("CREATE TABLE IF NOT EXISTS teams (team_id TEXT PRIMARY KEY, user_id INTEGER NULL, username TEXT NULL, full_name TEXT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS stations (station_id TEXT PRIMARY KEY, name TEXT NULL)")
         cursor.execute("CREATE TABLE IF NOT EXISTS routes (id INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT, station_order INTEGER, station_id TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS user_progress (user_id INTEGER PRIMARY KEY, team_id TEXT, current_index INTEGER DEFAULT 0, station_start_time REAL DEFAULT 0.0, status TEXT DEFAULT 'in_progress')")
+        cursor.execute("CREATE TABLE IF NOT EXISTS user_progress (user_id INTEGER PRIMARY KEY, team_id TEXT, current_index INTEGER DEFAULT 0, station_start_time REAL DEFAULT 0.0, status TEXT DEFAULT 'in_progress', finish_order INTEGER DEFAULT 0, keyword_attempts INTEGER DEFAULT 0)")
+        
+        try:
+            cursor.execute("ALTER TABLE user_progress ADD COLUMN finish_order INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            cursor.execute("ALTER TABLE user_progress ADD COLUMN keyword_attempts INTEGER DEFAULT 0")
+        except Exception:
+            pass
+            
         conn.commit()
         
         # Check if SQLite tables are empty and restore from JSON backup if available
@@ -127,8 +137,8 @@ def _init_db_sync():
                         cursor.execute("INSERT OR IGNORE INTO stations (station_id) VALUES (?)", (st_id,))
                         cursor.execute("INSERT INTO routes (team_id, station_order, station_id) VALUES (?, ?, ?)", (tid, idx, st_id))
                 for uid_str, pinfo in json_db.get("user_progress", {}).items():
-                    cursor.execute("INSERT OR REPLACE INTO user_progress (user_id, team_id, current_index, station_start_time, status) VALUES (?, ?, ?, ?, ?)",
-                                   (pinfo.get("user_id"), pinfo.get("team_id"), pinfo.get("current_index", 0), pinfo.get("station_start_time", 0.0), pinfo.get("status", "in_progress")))
+                    cursor.execute("INSERT OR REPLACE INTO user_progress (user_id, team_id, current_index, station_start_time, status, finish_order, keyword_attempts) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                   (pinfo.get("user_id"), pinfo.get("team_id"), pinfo.get("current_index", 0), pinfo.get("station_start_time", 0.0), pinfo.get("status", "in_progress"), pinfo.get("finish_order", 0), pinfo.get("keyword_attempts", 0)))
                 conn.commit()
         except Exception:
             pass
@@ -569,5 +579,146 @@ def _clear_routes_sync(team_id: Optional[str] = None) -> bool:
 
 async def clear_routes(team_id: Optional[str] = None) -> bool:
     return await asyncio.to_thread(_clear_routes_sync, team_id)
+
+def _increment_keyword_attempts_sync(user_id: int) -> int:
+    uid_str = str(user_id)
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        if uid_str in db["user_progress"]:
+            attempts = db["user_progress"][uid_str].get("keyword_attempts", 0) + 1
+            db["user_progress"][uid_str]["keyword_attempts"] = attempts
+            _save_json_db(db)
+            return attempts
+        return 1
+
+    with _get_connection() as conn:
+        conn.execute("UPDATE user_progress SET keyword_attempts = COALESCE(keyword_attempts, 0) + 1 WHERE user_id = ?", (user_id,))
+        conn.commit()
+        row = conn.execute("SELECT keyword_attempts FROM user_progress WHERE user_id = ?", (user_id,)).fetchone()
+        attempts = row["keyword_attempts"] if row and row["keyword_attempts"] is not None else 1
+    _sync_sqlite_to_json()
+    return attempts
+
+async def increment_keyword_attempts(user_id: int) -> int:
+    return await asyncio.to_thread(_increment_keyword_attempts_sync, user_id)
+
+def _complete_user_quest_sync(user_id: int) -> Dict[str, Any]:
+    uid_str = str(user_id)
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        max_order = max([p.get("finish_order", 0) for p in db["user_progress"].values()], default=0)
+        next_order = max_order + 1
+        if uid_str in db["user_progress"]:
+            db["user_progress"][uid_str]["status"] = "completed"
+            db["user_progress"][uid_str]["finish_order"] = next_order
+            _save_json_db(db)
+            return db["user_progress"][uid_str]
+        return {"user_id": user_id, "status": "completed", "finish_order": next_order, "keyword_attempts": 1}
+
+    with _get_connection() as conn:
+        row_max = conn.execute("SELECT MAX(finish_order) as max_ord FROM user_progress WHERE status = 'completed'").fetchone()
+        max_ord = row_max["max_ord"] if row_max and row_max["max_ord"] is not None else 0
+        next_ord = max_ord + 1
+        conn.execute("UPDATE user_progress SET status = 'completed', finish_order = ? WHERE user_id = ?", (next_ord, user_id))
+        conn.commit()
+        res = conn.execute("SELECT * FROM user_progress WHERE user_id = ?", (user_id,)).fetchone()
+        res_dict = dict(res) if res else {"user_id": user_id, "finish_order": next_ord, "keyword_attempts": 1}
+    _sync_sqlite_to_json()
+    return res_dict
+
+async def complete_user_quest(user_id: int) -> Dict[str, Any]:
+    return await asyncio.to_thread(_complete_user_quest_sync, user_id)
+
+def _get_leaderboard_sync() -> List[Dict[str, Any]]:
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        completed_list = [p for p in db["user_progress"].values() if p.get("status") == "completed"]
+        completed_list.sort(key=lambda x: x.get("finish_order", 999))
+        return completed_list
+
+    with _get_connection() as conn:
+        rows = conn.execute("SELECT * FROM user_progress WHERE status = 'completed' ORDER BY finish_order ASC").fetchall()
+        return [dict(r) for r in rows]
+
+async def get_leaderboard() -> List[Dict[str, Any]]:
+    return await asyncio.to_thread(_get_leaderboard_sync)
+
+def _check_all_teams_completed_sync() -> bool:
+    if not HAS_SQLITE:
+        db = _get_json_db()
+        occupied_user_ids = [t["user_id"] for t in db["teams"].values() if t.get("user_id") is not None]
+        if not occupied_user_ids:
+            return False
+        for uid in occupied_user_ids:
+            p = db["user_progress"].get(str(uid))
+            if not p or p.get("status") != "completed":
+                return False
+        return True
+
+    with _get_connection() as conn:
+        occupied = conn.execute("SELECT user_id FROM teams WHERE user_id IS NOT NULL").fetchall()
+        if not occupied:
+            return False
+        for r in occupied:
+            uid = r["user_id"]
+            p = conn.execute("SELECT status FROM user_progress WHERE user_id = ?", (uid,)).fetchone()
+            if not p or p["status"] != "completed":
+                return False
+        return True
+
+async def check_all_teams_completed() -> bool:
+    return await asyncio.to_thread(_check_all_teams_completed_sync)
+
+def _force_skip_user_station_sync(team_id_or_user_id: Any) -> Optional[Dict[str, Any]]:
+    target_user_id = None
+    if isinstance(team_id_or_user_id, int):
+        target_user_id = team_id_or_user_id
+    else:
+        tid_str = str(team_id_or_user_id).strip()
+        if tid_str.isdigit() and len(tid_str) > 6:
+            target_user_id = int(tid_str)
+        else:
+            team = _get_team_sync(tid_str)
+            if team and team.get("user_id"):
+                target_user_id = team["user_id"]
+
+    if not target_user_id:
+        return None
+
+    progress = _get_user_progress_sync(target_user_id)
+    if not progress or progress.get("status") != "in_progress":
+        return None
+
+    team_id = progress["team_id"]
+    route = _get_route_sync(team_id)
+    if not route:
+        return None
+
+    curr_index = progress["current_index"]
+    next_index = curr_index + 1
+    now_time = time.time()
+
+    if next_index < len(route):
+        _advance_user_station_sync(target_user_id, next_index, now_time)
+        next_st_id = route[next_index]["station_id"]
+        st_info = _get_station_sync(next_st_id)
+        st_name = st_info["name"] if st_info and st_info.get("name") else next_st_id
+        return {
+            "user_id": target_user_id,
+            "team_id": team_id,
+            "status": "in_progress",
+            "next_station_id": next_st_id,
+            "next_station_name": st_name
+        }
+    else:
+        _set_user_status_sync(target_user_id, "waiting_final_word")
+        return {
+            "user_id": target_user_id,
+            "team_id": team_id,
+            "status": "waiting_final_word"
+        }
+
+async def force_skip_user_station(team_id_or_user_id: Any) -> Optional[Dict[str, Any]]:
+    return await asyncio.to_thread(_force_skip_user_station_sync, team_id_or_user_id)
 
 
