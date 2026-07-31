@@ -27,6 +27,18 @@ def _get_json_db() -> Dict[str, Any]:
         "routes": {},
         "user_progress": {}
     }
+    env_json = os.getenv("BOT_DATA_JSON")
+    if env_json:
+        try:
+            data = json.loads(env_json)
+            if isinstance(data, dict):
+                for k in default_db:
+                    if k not in data:
+                        data[k] = default_db[k]
+                return data
+        except Exception:
+            pass
+
     for path in JSON_PATHS:
         if os.path.exists(path):
             try:

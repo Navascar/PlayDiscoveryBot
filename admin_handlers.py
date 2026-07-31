@@ -221,17 +221,9 @@ async def cmd_game_start(message: types.Message):
         st_info = await db.get_station(first_station["station_id"])
         st_name = st_info["name"] if st_info and st_info["name"] else first_station["station_id"]
         
-        route_items = []
-        for item in route:
-            st = await db.get_station(item["station_id"])
-            sname = st["name"] if st and st.get("name") else item["station_id"]
-            route_items.append(sname)
-        formatted_route = " ➔ ".join(route_items)
-        
         msg_text = (
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
-            f"📍 **Ваш маршрут:** {formatted_route}\n\n"
-            f"🎯 Перше завдання: **{st_name}**\n\n"
+            f"📍 Перше завдання: **{st_name}**\n\n"
             f"⏱️ На виконання відводиться 5 хвилин.\n"
             f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
         )

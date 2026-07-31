@@ -102,17 +102,9 @@ async def process_team_registration(message: types.Message, team_id: str):
                 st_info = await db.get_station(first_st)
                 st_name = st_info["name"] if st_info and st_info["name"] else first_st
                 
-                route_items = []
-                for item in route:
-                    st = await db.get_station(item["station_id"])
-                    sname = st["name"] if st and st.get("name") else item["station_id"]
-                    route_items.append(sname)
-                formatted_route = " ➔ ".join(route_items)
-                
                 await message.reply(
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
-                    f"📍 **Ваш маршрут:** {formatted_route}\n\n"
-                    f"🎯 Ваше перше завдання: **{st_name}**\n\n"
+                    f"📍 Ваше перше завдання: **{st_name}**\n\n"
                     f"⏱️ На виконання відводиться 5 хвилин.\n"
                     f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
                     parse_mode="Markdown",

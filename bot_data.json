@@ -1,0 +1,74 @@
+{
+  "settings": {
+    "game_started": "0"
+  },
+  "teams": {
+    "101": {
+      "team_id": "101",
+      "user_id": 12345678,
+      "username": "test_user",
+      "full_name": "Test User"
+    },
+    "102": {
+      "team_id": "102",
+      "user_id": null,
+      "username": null,
+      "full_name": null
+    },
+    "103": {
+      "team_id": "103",
+      "user_id": null,
+      "username": null,
+      "full_name": null
+    },
+    "104": {
+      "team_id": "104",
+      "user_id": null,
+      "username": null,
+      "full_name": null
+    },
+    "105": {
+      "team_id": "105",
+      "user_id": null,
+      "username": null,
+      "full_name": null
+    }
+  },
+  "stations": {
+    "1": {
+      "station_id": "1",
+      "name": "Головна брама"
+    },
+    "2": {
+      "station_id": "2",
+      "name": "Центральна альтанка"
+    },
+    "3": {
+      "station_id": "3",
+      "name": "Озеро"
+    }
+  },
+  "routes": {
+    "101": [
+      "1",
+      "2",
+      "3"
+    ],
+    "105": [
+      "1",
+      "2",
+      "3"
+    ]
+  },
+  "user_progress": {
+    "12345678": {
+      "user_id": 12345678,
+      "team_id": "101",
+      "current_index": 1,
+      "station_start_time": 1785488951.1630442,
+      "status": "completed",
+      "finish_order": 1,
+      "keyword_attempts": 2
+    }
+  }
+}

@@ -5,6 +5,5 @@ __pycache__/
 .env
 bot_data.db
 bot_data.db-journal
-bot_data.json
 .idea/
 .vscode/
