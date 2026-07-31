@@ -250,7 +250,12 @@ async def cmd_stop_game(message: types.Message):
     confirm_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="🛑 Так, зупинити гру", callback_data="confirm_stop_game"),
+                InlineKeyboardButton(text="🛑 Зупинити (зберегти учасників)", callback_data="confirm_stop_game"),
+            ],
+            [
+                InlineKeyboardButton(text="🗑️ Зупинити та звільнити учасників", callback_data="confirm_stop_game_clear"),
+            ],
+            [
                 InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_stop_game")
             ]
         ]
@@ -258,9 +263,10 @@ async def cmd_stop_game(message: types.Message):
     
     await message.reply(
         "⚠️ **УВАГА! ЗУПИНЕННЯ ГРИ**\n\n"
-        "Ви дійсно бажаєте зупинити поточну гру?\n"
-        "Це дійство зупинить гру, звільнить номери команд від учасників та скине їх прогрес.\n"
-        "_(Створені номери команд, станції та маршрути збережуться)_",
+        "Ви дійсно бажаєте зупинити поточну гру?\n\n"
+        "• **Зберегти учасників**: Зупиняє гру та скидає прогрес, але залишає реєстрації команд, створені станції та маршрути.\n"
+        "• **Звільнити учасників**: Додатково звільняє номери команд від учасників.\n\n"
+        "_(Усі номери команд, станції та їх маршрути завжди надійно зберігаються)_",
         parse_mode="Markdown",
         reply_markup=confirm_kb
     )
@@ -268,12 +274,27 @@ async def cmd_stop_game(message: types.Message):
 
 @router.callback_query(F.data == "confirm_stop_game")
 async def callback_confirm_stop_game(callback: types.CallbackQuery):
-    await db.stop_game_reset()
+    await db.stop_game_reset(clear_participants=False)
     try:
         await callback.message.edit_text(
             "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
-            "Скинуто статус гри, звільнено номери команд від учасників та весь прогрес.\n"
-            "(Створені номери команд та маршрути збережено).",
+            "Скинуто статус гри та прогрес учасників.\n"
+            "Створені номери команд, їх реєстрації та маршрути збережено.",
+            parse_mode="Markdown"
+        )
+    except Exception:
+        await callback.message.answer("🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**")
+    await callback.answer("Гру зупинено")
+
+
+@router.callback_query(F.data == "confirm_stop_game_clear")
+async def callback_confirm_stop_game_clear(callback: types.CallbackQuery):
+    await db.stop_game_reset(clear_participants=True)
+    try:
+        await callback.message.edit_text(
+            "🛑 **ГРУ УСПІШНО ЗУПИНЕНО!**\n\n"
+            "Скинуто статус гри, прогрес та звільнено номери команд від учасників.\n"
+            "Створені номери команд, станції та маршрути збережено.",
             parse_mode="Markdown"
         )
     except Exception:

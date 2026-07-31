@@ -11,33 +11,82 @@ except ImportError:
     HAS_SQLITE = False
     import json
 
-# Fallback JSON storage path if sqlite3 C-extension is not available on Vercel
-JSON_DB_PATH = "/tmp/bot_data.json" if os.getenv("VERCEL") else "bot_data.json"
+import json
+
+# Fallback JSON storage paths
+JSON_PATHS = [
+    "bot_data.json",
+    "/tmp/bot_data.json"
+]
 
 def _get_json_db() -> Dict[str, Any]:
-    if not os.path.exists(JSON_DB_PATH):
-        return {
-            "settings": {},
-            "teams": {},
-            "stations": {},
-            "routes": {},
-            "user_progress": {}
-        }
-    try:
-        with open(JSON_DB_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {
-            "settings": {},
-            "teams": {},
-            "stations": {},
-            "routes": {},
-            "user_progress": {}
-        }
+    default_db = {
+        "settings": {},
+        "teams": {},
+        "stations": {},
+        "routes": {},
+        "user_progress": {}
+    }
+    for path in JSON_PATHS:
+        if os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        for k in default_db:
+                            if k not in data:
+                                data[k] = default_db[k]
+                        return data
+            except Exception:
+                pass
+    return default_db
 
 def _save_json_db(data: Dict[str, Any]):
-    with open(JSON_DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    for path in JSON_PATHS:
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+def _sync_sqlite_to_json():
+    if not HAS_SQLITE:
+        return
+    try:
+        data = {
+            "settings": {},
+            "teams": {},
+            "stations": {},
+            "routes": {},
+            "user_progress": {}
+        }
+        with _get_connection() as conn:
+            s_rows = conn.execute("SELECT key, value FROM settings").fetchall()
+            for r in s_rows:
+                data["settings"][r["key"]] = r["value"]
+            
+            t_rows = conn.execute("SELECT * FROM teams").fetchall()
+            for r in t_rows:
+                data["teams"][r["team_id"]] = dict(r)
+            
+            st_rows = conn.execute("SELECT * FROM stations").fetchall()
+            for r in st_rows:
+                data["stations"][r["station_id"]] = dict(r)
+            
+            r_rows = conn.execute("SELECT team_id, station_id FROM routes ORDER BY team_id, station_order").fetchall()
+            for r in r_rows:
+                tid = r["team_id"]
+                if tid not in data["routes"]:
+                    data["routes"][tid] = []
+                data["routes"][tid].append(r["station_id"])
+            
+            up_rows = conn.execute("SELECT * FROM user_progress").fetchall()
+            for r in up_rows:
+                data["user_progress"][str(r["user_id"])] = dict(r)
+        
+        _save_json_db(data)
+    except Exception:
+        pass
 
 def _get_connection():
     if not HAS_SQLITE:
@@ -58,6 +107,33 @@ def _init_db_sync():
         cursor.execute("CREATE TABLE IF NOT EXISTS routes (id INTEGER PRIMARY KEY AUTOINCREMENT, team_id TEXT, station_order INTEGER, station_id TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS user_progress (user_id INTEGER PRIMARY KEY, team_id TEXT, current_index INTEGER DEFAULT 0, station_start_time REAL DEFAULT 0.0, status TEXT DEFAULT 'in_progress')")
         conn.commit()
+        
+        # Check if SQLite tables are empty and restore from JSON backup if available
+        try:
+            t_count = cursor.execute("SELECT COUNT(*) as cnt FROM teams").fetchone()["cnt"]
+            r_count = cursor.execute("SELECT COUNT(*) as cnt FROM routes").fetchone()["cnt"]
+            
+            if t_count == 0 and r_count == 0:
+                json_db = _get_json_db()
+                for k, v in json_db.get("settings", {}).items():
+                    cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (k, str(v)))
+                for tid, tinfo in json_db.get("teams", {}).items():
+                    cursor.execute("INSERT OR IGNORE INTO teams (team_id, user_id, username, full_name) VALUES (?, ?, ?, ?)",
+                                   (tid, tinfo.get("user_id"), tinfo.get("username"), tinfo.get("full_name")))
+                for sid, sinfo in json_db.get("stations", {}).items():
+                    cursor.execute("INSERT OR IGNORE INTO stations (station_id, name) VALUES (?, ?)", (sid, sinfo.get("name")))
+                for tid, st_list in json_db.get("routes", {}).items():
+                    for idx, st_id in enumerate(st_list):
+                        cursor.execute("INSERT OR IGNORE INTO stations (station_id) VALUES (?)", (st_id,))
+                        cursor.execute("INSERT INTO routes (team_id, station_order, station_id) VALUES (?, ?, ?)", (tid, idx, st_id))
+                for uid_str, pinfo in json_db.get("user_progress", {}).items():
+                    cursor.execute("INSERT OR REPLACE INTO user_progress (user_id, team_id, current_index, station_start_time, status) VALUES (?, ?, ?, ?, ?)",
+                                   (pinfo.get("user_id"), pinfo.get("team_id"), pinfo.get("current_index", 0), pinfo.get("station_start_time", 0.0), pinfo.get("status", "in_progress")))
+                conn.commit()
+        except Exception:
+            pass
+
+    _sync_sqlite_to_json()
 
 async def init_db():
     await asyncio.to_thread(_init_db_sync)
@@ -80,6 +156,7 @@ def _set_setting_sync(key: str, value: str):
     with _get_connection() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
         conn.commit()
+    _sync_sqlite_to_json()
 
 async def get_setting(key: str) -> Optional[str]:
     return await asyncio.to_thread(_get_setting_sync, key)
@@ -111,7 +188,8 @@ def _add_team_sync(team_id: str) -> bool:
             except sqlite3.IntegrityError:
                 pass
         conn.commit()
-        return added_any
+    _sync_sqlite_to_json()
+    return added_any
 
 async def add_team(team_id: str) -> bool:
     return await asyncio.to_thread(_add_team_sync, team_id)
@@ -186,7 +264,8 @@ def _occupy_team_sync(team_id: str, user_id: int, username: Optional[str], full_
         
         conn.execute("UPDATE teams SET user_id = ?, username = ?, full_name = ? WHERE team_id = ?", (user_id, username, full_name, tid))
         conn.commit()
-        return "SUCCESS"
+    _sync_sqlite_to_json()
+    return "SUCCESS"
 
 async def occupy_team(team_id: str, user_id: int, username: Optional[str], full_name: Optional[str]) -> str:
     return await asyncio.to_thread(_occupy_team_sync, team_id, user_id, username, full_name)
@@ -215,7 +294,8 @@ def _clear_team_sync(team_id: str) -> bool:
         if user_id:
             conn.execute("DELETE FROM user_progress WHERE user_id = ?", (user_id,))
         conn.commit()
-        return True
+    _sync_sqlite_to_json()
+    return True
 
 async def clear_team(team_id: str) -> bool:
     return await asyncio.to_thread(_clear_team_sync, team_id)
@@ -236,12 +316,12 @@ def _add_station_sync(station_id: str, name: Optional[str] = None) -> bool:
         try:
             conn.execute("INSERT INTO stations (station_id, name) VALUES (?, ?)", (sid, name))
             conn.commit()
-            return True
         except sqlite3.IntegrityError:
             if name:
                 conn.execute("UPDATE stations SET name = ? WHERE station_id = ?", (name, sid))
                 conn.commit()
-            return True
+    _sync_sqlite_to_json()
+    return True
 
 async def add_station(station_id: str, name: Optional[str] = None) -> bool:
     return await asyncio.to_thread(_add_station_sync, station_id, name)
@@ -285,7 +365,8 @@ def _name_station_sync(station_id: str, name: str) -> bool:
         else:
             conn.execute("UPDATE stations SET name = ? WHERE station_id = ?", (nm, sid))
         conn.commit()
-        return True
+    _sync_sqlite_to_json()
+    return True
 
 async def name_station(station_id: str, name: str) -> bool:
     return await asyncio.to_thread(_name_station_sync, station_id, name)
@@ -309,7 +390,8 @@ def _clear_station_sync(station_id: str) -> bool:
         conn.execute("DELETE FROM stations WHERE station_id = ?", (sid,))
         conn.execute("DELETE FROM routes WHERE station_id = ?", (sid,))
         conn.commit()
-        return True
+    _sync_sqlite_to_json()
+    return True
 
 async def clear_station(station_id: str) -> bool:
     return await asyncio.to_thread(_clear_station_sync, station_id)
@@ -336,7 +418,8 @@ def _set_route_sync(team_id: str, station_ids: List[str]) -> bool:
             conn.execute("INSERT OR IGNORE INTO stations (station_id) VALUES (?)", (st_id,))
             conn.execute("INSERT INTO routes (team_id, station_order, station_id) VALUES (?, ?, ?)", (tid, idx, st_id))
         conn.commit()
-        return True
+    _sync_sqlite_to_json()
+    return True
 
 async def set_route(team_id: str, station_ids: List[str]) -> bool:
     return await asyncio.to_thread(_set_route_sync, team_id, station_ids)
@@ -401,7 +484,8 @@ def _init_user_progress_sync(user_id: int, team_id: str, start_time: float) -> D
             (user_id, tid, start_time)
         )
         conn.commit()
-        return p_data
+    _sync_sqlite_to_json()
+    return p_data
 
 async def init_user_progress(user_id: int, team_id: str, start_time: float) -> Dict[str, Any]:
     return await asyncio.to_thread(_init_user_progress_sync, user_id, team_id, start_time)
@@ -418,6 +502,7 @@ def _advance_user_station_sync(user_id: int, next_index: int, now_time: float):
     with _get_connection() as conn:
         conn.execute("UPDATE user_progress SET current_index = ?, station_start_time = ? WHERE user_id = ?", (next_index, now_time, user_id))
         conn.commit()
+    _sync_sqlite_to_json()
 
 async def advance_user_station(user_id: int, next_index: int, now_time: float):
     await asyncio.to_thread(_advance_user_station_sync, user_id, next_index, now_time)
@@ -433,29 +518,33 @@ def _set_user_status_sync(user_id: int, status: str):
     with _get_connection() as conn:
         conn.execute("UPDATE user_progress SET status = ? WHERE user_id = ?", (status, user_id))
         conn.commit()
+    _sync_sqlite_to_json()
 
 async def set_user_status(user_id: int, status: str):
     await asyncio.to_thread(_set_user_status_sync, user_id, status)
 
-def _stop_game_reset_sync():
+def _stop_game_reset_sync(clear_participants: bool = False):
     if not HAS_SQLITE:
         db = _get_json_db()
         db["settings"]["game_started"] = "0"
         db["user_progress"] = {}
-        for tid in db["teams"]:
-            db["teams"][tid]["user_id"] = None
-            db["teams"][tid]["username"] = None
-            db["teams"][tid]["full_name"] = None
+        if clear_participants:
+            for tid in db["teams"]:
+                db["teams"][tid]["user_id"] = None
+                db["teams"][tid]["username"] = None
+                db["teams"][tid]["full_name"] = None
         _save_json_db(db)
         return
     with _get_connection() as conn:
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('game_started', '0')")
         conn.execute("DELETE FROM user_progress")
-        conn.execute("UPDATE teams SET user_id = NULL, username = NULL, full_name = NULL")
+        if clear_participants:
+            conn.execute("UPDATE teams SET user_id = NULL, username = NULL, full_name = NULL")
         conn.commit()
+    _sync_sqlite_to_json()
 
-async def stop_game_reset():
-    await asyncio.to_thread(_stop_game_reset_sync)
+async def stop_game_reset(clear_participants: bool = False):
+    await asyncio.to_thread(_stop_game_reset_sync, clear_participants)
 
 def _clear_routes_sync(team_id: Optional[str] = None) -> bool:
     if not HAS_SQLITE:
@@ -475,7 +564,8 @@ def _clear_routes_sync(team_id: Optional[str] = None) -> bool:
         else:
             conn.execute("DELETE FROM routes")
         conn.commit()
-        return True
+    _sync_sqlite_to_json()
+    return True
 
 async def clear_routes(team_id: Optional[str] = None) -> bool:
     return await asyncio.to_thread(_clear_routes_sync, team_id)

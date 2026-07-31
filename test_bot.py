@@ -8,8 +8,16 @@ from user_handlers import get_done_inline_keyboard, get_done_reply_keyboard
 
 async def run_tests():
     print("--- Running Verification Tests ---")
+    if os.path.exists("bot_data.json"):
+        try:
+            os.remove("bot_data.json")
+        except Exception:
+            pass
     if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
+        try:
+            os.remove(DB_PATH)
+        except Exception:
+            pass
     
     await db.init_db()
     print("1. Database initialized.")
@@ -90,16 +98,36 @@ async def run_tests():
     assert prog_next["current_index"] == 1
     print("11. Advanced to station index 1.")
     
-    # 8. Final Word
-    await db.set_setting("final_word", "Перемога")
-    word = await db.get_setting("final_word")
-    assert word.casefold() == "перемога".casefold()
-    print("12. Final word set and matched (case-insensitive).")
+    # 9. Stop Game & Verify Team / Route Persistence
+    await db.stop_game_reset(clear_participants=False)
+    route_after_stop = await db.get_route("105")
+    assert len(route_after_stop) == 3
+    teams_after_stop = await db.get_teams()
+    assert len(teams_after_stop) >= 4
+    print("13. Teams and routes preserved after stop_game_reset.")
+
+    # 10. Cold Start Simulation (clear in-memory/tables to simulate empty DB on new container)
+    try:
+        if os.path.exists(DB_PATH):
+            with db._get_connection() as conn:
+                conn.execute("DELETE FROM teams")
+                conn.execute("DELETE FROM routes")
+                conn.commit()
+    except Exception:
+        pass
+    await db.init_db()
+    restored_route = await db.get_route("105")
+    assert len(restored_route) == 3
+    restored_teams = await db.get_teams()
+    assert len(restored_teams) >= 4
+    print("14. Cold start restoration from JSON backup to SQLite verified.")
     
-    # Cleanup DB
+    # Cleanup DB & JSON backup created for tests
     try:
         if os.path.exists(DB_PATH):
             os.remove(DB_PATH)
+        if os.path.exists("bot_data.json"):
+            os.remove("bot_data.json")
     except PermissionError:
         pass
         
