@@ -89,21 +89,29 @@ async def set_setting(key: str, value: str):
 
 # Teams functions
 def _add_team_sync(team_id: str) -> bool:
-    tid = team_id.strip()
+    import re
+    tids = [t.strip() for t in re.split(r'[\s,]+', team_id) if t.strip()]
+    if not tids:
+        return False
     if not HAS_SQLITE:
         db = _get_json_db()
-        if tid in db["teams"]:
-            return False
-        db["teams"][tid] = {"team_id": tid, "user_id": None, "username": None, "full_name": None}
+        added_any = False
+        for tid in tids:
+            if tid not in db["teams"]:
+                db["teams"][tid] = {"team_id": tid, "user_id": None, "username": None, "full_name": None}
+                added_any = True
         _save_json_db(db)
-        return True
+        return added_any
     with _get_connection() as conn:
-        try:
-            conn.execute("INSERT INTO teams (team_id) VALUES (?)", (tid,))
-            conn.commit()
-            return True
-        except sqlite3.IntegrityError:
-            return False
+        added_any = False
+        for tid in tids:
+            try:
+                conn.execute("INSERT INTO teams (team_id) VALUES (?)", (tid,))
+                added_any = True
+            except sqlite3.IntegrityError:
+                pass
+        conn.commit()
+        return added_any
 
 async def add_team(team_id: str) -> bool:
     return await asyncio.to_thread(_add_team_sync, team_id)
@@ -309,11 +317,11 @@ async def clear_station(station_id: str) -> bool:
 # Routes functions
 def _set_route_sync(team_id: str, station_ids: List[str]) -> bool:
     tid = team_id.strip()
-    cleaned_ids = [s.strip() for s in station_ids]
+    cleaned_ids = [s.strip() for s in station_ids if s.strip()]
     if not HAS_SQLITE:
         db = _get_json_db()
         if tid not in db["teams"]:
-            return False
+            db["teams"][tid] = {"team_id": tid, "user_id": None, "username": None, "full_name": None}
         db["routes"][tid] = cleaned_ids
         for sid in cleaned_ids:
             if sid not in db["stations"]:
@@ -322,9 +330,7 @@ def _set_route_sync(team_id: str, station_ids: List[str]) -> bool:
         return True
 
     with _get_connection() as conn:
-        team = conn.execute("SELECT team_id FROM teams WHERE team_id = ?", (tid,)).fetchone()
-        if not team:
-            return False
+        conn.execute("INSERT OR IGNORE INTO teams (team_id) VALUES (?)", (tid,))
         conn.execute("DELETE FROM routes WHERE team_id = ?", (tid,))
         for idx, st_id in enumerate(cleaned_ids):
             conn.execute("INSERT OR IGNORE INTO stations (station_id) VALUES (?)", (st_id,))

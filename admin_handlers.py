@@ -149,16 +149,15 @@ async def cmd_add_route(message: types.Message):
         return
     
     route_text = message.reply_to_message.text
-    raw_items = re.split(r'[\n,]+', route_text)
-    station_ids = [item.strip() for item in raw_items if item.strip()]
+    raw_items = re.split(r'[\n,➔→;—–]+|\s*->\s*', route_text)
+    station_ids = []
+    for item in raw_items:
+        cleaned = re.sub(r'^\d+[\.\)]\s*', '', item.strip()).strip()
+        if cleaned:
+            station_ids.append(cleaned)
     
     if not station_ids:
         await message.reply("❌ Не вдалося знайти номери станцій у повідомленні.", parse_mode="Markdown")
-        return
-    
-    team = await db.get_team(team_id)
-    if not team:
-        await message.reply(f"❌ Команду **№{team_id}** не знайдено в системі. Спочатку додайте її через `/add_team {team_id}`.", parse_mode="Markdown")
         return
     
     success = await db.set_route(team_id, station_ids)
@@ -188,7 +187,7 @@ async def cmd_final_word(message: types.Message):
 
 def get_done_inline_keyboard():
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🟢 ✅ Виконано", callback_data="done_station")]]
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Виконано", callback_data="done_station", style="success")]]
     )
 
 @router.message(Command("game_start"))
@@ -226,7 +225,7 @@ async def cmd_game_start(message: types.Message):
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
             f"📍 Перше завдання: **{st_name}**\n\n"
             f"⏱️ На виконання відводиться 5 хвилин.\n"
-            f"Після завершення натисніть зелену кнопку **«🟢 ✅ Виконано»** нижче."
+            f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
         )
         
         try:
@@ -240,7 +239,7 @@ async def cmd_game_start(message: types.Message):
         except Exception as e:
             logger.error(f"Failed to send start message to user {user_id}: {e}")
     
-    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «🟢 ✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
+    await message.reply(f"🚀 **ГРА ОФІЦІЙНО РОЗПОЧАТА!**\n\nПерше завдання та кнопку «✅ Виконано» надіслано для **{started_count}** команд.", parse_mode="Markdown")
 
 
 @router.message(Command("stop_game"))

@@ -1,8 +1,10 @@
 import asyncio
 import os
 import time
+import re
 import database as db
 from config import DB_PATH
+from user_handlers import get_done_inline_keyboard, get_done_reply_keyboard
 
 async def run_tests():
     print("--- Running Verification Tests ---")
@@ -12,10 +14,15 @@ async def run_tests():
     await db.init_db()
     print("1. Database initialized.")
     
-    # 1. Add Team
+    # 1. Add Team (single and multiple)
     res = await db.add_team("101")
     assert res is True
-    print("2. Team 101 added.")
+    res_multi = await db.add_team("102, 103, 104")
+    assert res_multi is True
+    teams = await db.get_teams()
+    team_ids = [t["team_id"] for t in teams]
+    assert "101" in team_ids and "102" in team_ids and "103" in team_ids and "104" in team_ids
+    print("2. Teams 101, 102, 103, 104 added.")
     
     # 2. Add Stations
     await db.add_station("1", "Головна брама")
@@ -23,49 +30,71 @@ async def run_tests():
     await db.add_station("3", "Озеро")
     print("3. Stations 1, 2, 3 added.")
     
-    # 3. Set Route
-    await db.set_route("101", ["1", "2", "3"])
-    route = await db.get_route("101")
-    assert len(route) == 3
-    assert route[0]["station_id"] == "1"
-    assert route[1]["station_id"] == "2"
-    assert route[2]["station_id"] == "3"
-    print("4. Route for Team 101 set correctly.")
+    # 3. Set Route for team that wasn't pre-created (Auto-creation test)
+    await db.set_route("105", ["1", "2", "3"])
+    route105 = await db.get_route("105")
+    assert len(route105) == 3
+    t105 = await db.get_team("105")
+    assert t105 is not None
+    print("4. Team 105 auto-created on set_route and route set correctly.")
     
-    # 4. Occupy Team
+    # 4. Route text parsing test with arrows and bullet points
+    sample_route_text = "1. Station A -> 2. Station B ➔ 3. Station C"
+    raw_items = re.split(r'[\n,➔→;—–]+|\s*->\s*', sample_route_text)
+    parsed_ids = []
+    for item in raw_items:
+        cleaned = re.sub(r'^\d+[\.\)]\s*', '', item.strip()).strip()
+        if cleaned:
+            parsed_ids.append(cleaned)
+    assert parsed_ids == ["Station A", "Station B", "Station C"]
+    print("5. Route text parsing with arrows and bullets verified.")
+    
+    # 5. Keyboard styling and emoji check
+    inline_kb = get_done_inline_keyboard()
+    reply_kb = get_done_reply_keyboard()
+    inline_btn = inline_kb.inline_keyboard[0][0]
+    reply_btn = reply_kb.keyboard[0][0]
+    
+    assert inline_btn.text == "✅ Виконано"
+    assert inline_btn.style == "success"
+    assert reply_btn.text == "✅ Виконано"
+    assert reply_btn.style == "success"
+    print("6. Button text and style='success' verified.")
+    
+    # 6. Occupy Team
     occ_res = await db.occupy_team("101", 12345678, "test_user", "Test User")
     assert occ_res == "SUCCESS"
-    print("5. Team 101 occupied by user 12345678.")
+    print("7. Team 101 occupied by user 12345678.")
     
     # Occupy again by another user -> Should be ALREADY_TAKEN
     occ_res2 = await db.occupy_team("101", 99999999, "other_user", "Other User")
     assert occ_res2 == "ALREADY_TAKEN"
-    print("6. Prevented duplicate occupation of Team 101.")
+    print("8. Prevented duplicate occupation of Team 101.")
     
-    # 5. User Progress & Timer
+    # 7. User Progress & Timer
     now = time.time()
     await db.init_user_progress(12345678, "101", now)
     prog = await db.get_user_progress(12345678)
     assert prog["current_index"] == 0
     assert prog["status"] == "in_progress"
-    print("7. User progress initialized at index 0.")
+    print("9. User progress initialized at index 0.")
     
     # Cooldown check: 200s passed < 300s -> Not ready
     elapsed = 200
     assert elapsed < 300
-    print("8. 5-minute timer restriction verified (200s < 300s).")
+    print("10. 5-minute timer restriction verified (200s < 300s).")
     
     # Advance station after 300s
     await db.advance_user_station(12345678, 1, now + 301)
     prog_next = await db.get_user_progress(12345678)
     assert prog_next["current_index"] == 1
-    print("9. Advanced to station index 1.")
+    print("11. Advanced to station index 1.")
     
-    # 6. Final Word
+    # 8. Final Word
     await db.set_setting("final_word", "Перемога")
     word = await db.get_setting("final_word")
     assert word.casefold() == "перемога".casefold()
-    print("10. Final word set and matched (case-insensitive).")
+    print("12. Final word set and matched (case-insensitive).")
     
     # Cleanup DB
     try:

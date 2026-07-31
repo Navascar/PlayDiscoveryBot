@@ -9,13 +9,13 @@ router = Router()
 
 def get_done_reply_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🟢 ✅ Виконано")]],
+        keyboard=[[KeyboardButton(text="✅ Виконано", style="success")]],
         resize_keyboard=True
     )
 
 def get_done_inline_keyboard():
     return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="🟢 ✅ Виконано", callback_data="done_station")]]
+        inline_keyboard=[[InlineKeyboardButton(text="✅ Виконано", callback_data="done_station", style="success")]]
     )
 
 @router.message(F.chat.type == "private", CommandStart())
@@ -40,7 +40,8 @@ async def cmd_start(message: types.Message):
             await message.reply(
                 f"👋 Ви вже зареєстровані за командою **№{team_id}**.\n"
                 f"Очікуйте на початок гри від організаторів.",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove()
             )
             return
         
@@ -62,20 +63,21 @@ async def cmd_start(message: types.Message):
                     
                     await message.reply(
                         f"📍 Ваше поточне завдання: **{st_name}**\n\n"
-                        f"Після виконання натисніть зелену кнопку **«🟢 ✅ Виконано»**.",
+                        f"Після виконання натисніть кнопку **«✅ Виконано»**.",
                         parse_mode="Markdown",
                         reply_markup=get_done_inline_keyboard()
                     )
                     return
         
-        await message.reply(f"👋 Ви зареєстровані за командою **№{team_id}**. Очікуйте нових інструкцій.", parse_mode="Markdown")
+        await message.reply(f"👋 Ви зареєстровані за командою **№{team_id}**. Очікуйте нових інструкцій.", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
         return
     
     # Prompt to enter team number
     await message.reply(
         "👋 **Вітаємо у боті-путівнику квесту!**\n\n"
         "Будь ласка, введіть номер вашої команди (наприклад: `1`):",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -104,30 +106,32 @@ async def process_team_registration(message: types.Message, team_id: str):
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
                     f"📍 Ваше перше завдання: **{st_name}**\n\n"
                     f"⏱️ На виконання відводиться 5 хвилин.\n"
-                    f"Після завершення натисніть зелену кнопку **«🟢 ✅ Виконано»** нижче.",
+                    f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
                     parse_mode="Markdown",
                     reply_markup=get_done_inline_keyboard()
                 )
             else:
                 await message.reply(
                     f"✅ Вашу команду **№{team_id}** підтверджено! Маршрут для вашої команди ще формується організаторами.",
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
                 )
         else:
             await message.reply(
                 f"✅ Вашу команду **№{team_id}** успішно підтверджено!\n"
                 f"Очікуйте на початок гри від організаторів.",
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove()
             )
             
     elif result == "ALREADY_TAKEN":
-        await message.reply(f"❌ Номер команди **№{team_id}** вже зайнятий іншим учасником! Будь ласка, введіть інший номер команди.", parse_mode="Markdown")
+        await message.reply(f"❌ Номер команди **№{team_id}** вже зайнятий іншим учасником! Будь ласка, введіть інший номер команди.", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     elif result == "NOT_FOUND":
-        await message.reply(f"❌ Команди з номером **№{team_id}** не існує. Запитайте дійсний номер команди у організаторів.", parse_mode="Markdown")
+        await message.reply(f"❌ Команди з номером **№{team_id}** не існує. Запитайте дійсний номер команди у організаторів.", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     elif result == "USER_ALREADY_IN_TEAM":
         existing = await db.get_team_by_user_id(user_id)
         team_num = existing["team_id"] if existing else "?"
-        await message.reply(f"⚠️ Ви вже зареєстровані за командою **№{team_num}**.", parse_mode="Markdown")
+        await message.reply(f"⚠️ Ви вже зареєстровані за командою **№{team_num}**.", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
 
 
 async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=None):
@@ -235,7 +239,7 @@ async def handle_private_text(message: types.Message):
         final_word = await db.get_setting("final_word")
         
         if not final_word:
-            await message.reply("⚠️ Організатори ще не встановили фінальне слово. Зачекайте, будь ласка.")
+            await message.reply("⚠️ Організатори ще не встановили фінальне слово. Зачекайте, будь ласка.", reply_markup=ReplyKeyboardRemove())
             return
         
         if text.casefold() == final_word.strip().casefold():
@@ -259,7 +263,7 @@ async def handle_private_text(message: types.Message):
             except Exception as e:
                 print(f"Failed to notify admin group: {e}")
         else:
-            await message.reply("❌ Невірне ключове слово. Спробуйте ще раз:")
+            await message.reply("❌ Невірне ключове слово. Спробуйте ще раз:", reply_markup=ReplyKeyboardRemove())
         return
 
     # Check if participant is attempting team registration
@@ -271,11 +275,11 @@ async def handle_private_text(message: types.Message):
         # User is already registered and typed something else
         if progress and progress["status"] == "in_progress":
             await message.reply(
-                "Для підтвердження проходження натисніть зелену кнопку **«🟢 ✅ Виконано»** під завданням.",
+                "Для підтвердження проходження натисніть кнопку **«✅ Виконано»** під завданням.",
                 parse_mode="Markdown",
                 reply_markup=get_done_inline_keyboard()
             )
         elif progress and progress["status"] == "completed":
-            await message.reply("🏆 Ви вже успішно завершили квест!")
+            await message.reply("🏆 Ви вже успішно завершили квест!", reply_markup=ReplyKeyboardRemove())
         else:
-            await message.reply(f"Ви зареєстровані за командою **№{existing_team['team_id']}**. Очікуйте на початок гри.", parse_mode="Markdown")
+            await message.reply(f"Ви зареєстровані за командою **№{existing_team['team_id']}**. Очікуйте на початок гри.", parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
