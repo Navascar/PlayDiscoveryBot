@@ -1,11 +1,43 @@
+import os
 import time
 from aiogram import Router, types, F
 from aiogram.filters import Command, CommandStart
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
+    InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
+)
 from config import ADMIN_GROUP_ID, STATION_COOLDOWN_SECONDS
 import database as db
 
 router = Router()
+
+async def send_final_word_prompt(bot, chat_id: int):
+    caption_text = (
+        "🎉 **Вітаємо! Ви успішно пройшли всі станції!**\n\n"
+        "🧩 **Фінальне завдання:**\n"
+        "Складіть та розгадайте фінальне слово за цим шифром Брайля.\n\n"
+        "✍️ **Введіть розгадане ключове слово у цей чат:**"
+    )
+    if os.path.exists("braille_cipher.png"):
+        try:
+            photo = FSInputFile("braille_cipher.png")
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo,
+                caption=caption_text,
+                parse_mode="Markdown",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+        except Exception as e:
+            print(f"Failed to send cipher photo: {e}")
+    
+    await bot.send_message(
+        chat_id=chat_id,
+        text=caption_text,
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 def get_done_reply_keyboard():
     return ReplyKeyboardMarkup(
@@ -47,7 +79,7 @@ async def cmd_start(message: types.Message):
         
         if progress:
             if progress["status"] == "waiting_final_word":
-                await message.reply("🎉 Ви пройшли всі завдання!\n\nВведіть фінальне повідомлення:", reply_markup=ReplyKeyboardRemove())
+                await send_final_word_prompt(message.bot, user_id)
                 return
             elif progress["status"] == "completed":
                 await message.reply("🏆 Ви успішно завершили квест! Дякуємо за участь!", reply_markup=ReplyKeyboardRemove())
@@ -142,7 +174,7 @@ async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=No
         return
     
     if progress["status"] == "waiting_final_word":
-        await reply_func("🎉 Ви вже пройшли всі завдання!\n\nВведіть фінальне повідомлення:")
+        await send_final_word_prompt(bot, user_id)
         return
     elif progress["status"] == "completed":
         await reply_func("🏆 Ви вже успішно завершили квест!")
@@ -198,14 +230,7 @@ async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=No
         await db.set_user_status(user_id, "waiting_final_word")
         if alert_func:
             await alert_func("🎉 Вітаємо! Ви пройшли всі завдання.")
-        
-        await bot.send_message(
-            user_id,
-            "🎉 **Вітаємо! Ви пройшли всі завдання.**\n\n"
-            "Введіть фінальне повідомлення:",
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await send_final_word_prompt(bot, user_id)
 
 
 @router.callback_query(F.data == "done_station")
@@ -260,13 +285,7 @@ async def cmd_skip_station(message: types.Message):
     elif res["status"] == "waiting_final_word":
         await message.reply(f"⏩ Станцію для команди **№{team_id}** успішно пропущено! Команда перейшла до фінального слова.", parse_mode="Markdown")
         try:
-            await message.bot.send_message(
-                target_uid,
-                "🎉 **Вітаємо! Всі станції пройдено.**\n\n"
-                "Введіть фінальне повідомлення:",
-                parse_mode="Markdown",
-                reply_markup=ReplyKeyboardRemove()
-            )
+            await send_final_word_prompt(message.bot, target_uid)
         except Exception as e:
             print(f"Failed to notify user on skip: {e}")
 
