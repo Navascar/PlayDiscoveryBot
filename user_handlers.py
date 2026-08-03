@@ -105,7 +105,7 @@ async def process_team_registration(message: types.Message, team_id: str):
                 await message.reply(
                     f"✅ Вашу команду **№{team_id}** підтверджено!\n🚀 **Гра вже триває!**\n\n"
                     f"📍 Ваше перше завдання: **{st_name}**\n\n"
-                    f"⏱️ На виконання відводиться {STATION_COOLDOWN_SECONDS // 60} хвилин.\n"
+                    f"⏱️ На виконання відводиться 5 хвилин.\n"
                     f"Після завершення натисніть кнопку **«✅ Виконано»** нижче.",
                     parse_mode="Markdown",
                     reply_markup=get_done_inline_keyboard()
@@ -157,7 +157,7 @@ async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=No
         remaining = int(cooldown - elapsed)
         mins = remaining // 60
         secs = remaining % 60
-        warning_msg = f"⏳ Не минуло {cooldown // 60} хвилин, які відводяться на виконання.\nЗалишилось: {mins} хв. {secs} сек."
+        warning_msg = f"⏳ Не минуло 5 хвилин, які відводяться на виконання.\nЗалишилось: {mins} хв. {secs} сек."
         
         if alert_func:
             await alert_func(warning_msg, show_alert=True)
@@ -190,7 +190,7 @@ async def check_and_advance_station(bot, user_id: int, reply_func, alert_func=No
             user_id,
             f"✅ Виконано!\n\n"
             f"📍 Наступне завдання: **{st_name}**\n\n"
-            f"⏱️ У вас є {STATION_COOLDOWN_SECONDS // 60} хвилин на виконання.",
+            f"⏱️ У вас є 5 хвилин на виконання.",
             parse_mode="Markdown",
             reply_markup=get_done_inline_keyboard()
         )
@@ -251,7 +251,7 @@ async def cmd_skip_station(message: types.Message):
                 target_uid,
                 f"⏩ **Організатори пропустили станцію!**\n\n"
                 f"📍 Наступне завдання: **{st_name}**\n\n"
-                f"⏱️ У вас є {STATION_COOLDOWN_SECONDS // 60} хвилин на виконання.",
+                f"⏱️ У вас є 5 хвилин на виконання.",
                 parse_mode="Markdown",
                 reply_markup=get_done_inline_keyboard()
             )

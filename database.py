@@ -115,6 +115,14 @@ def _save_telegram_backup(data: Dict[str, Any]):
     bot_token, admin_group_id = _get_bot_and_group()
     if not bot_token or not admin_group_id:
         return
+
+    # Safety check: do not overwrite a non-empty backup with an empty database
+    has_content = bool(data.get("teams") or data.get("routes") or data.get("stations"))
+    if not has_content:
+        existing = _fetch_telegram_backup()
+        if existing and (existing.get("teams") or existing.get("routes")):
+            return
+
     try:
         json_str = json.dumps(data, ensure_ascii=False, indent=2)
         
@@ -243,7 +251,7 @@ def _get_json_db() -> Dict[str, Any]:
 
     # Fetch from Vercel KV / Upstash Redis
     kv_data = _fetch_kv_db()
-    if kv_data and isinstance(kv_data, dict):
+    if kv_data and isinstance(kv_data, dict) and (kv_data.get("teams") or kv_data.get("routes") or kv_data.get("stations")):
         for k in default_db:
             if k not in kv_data:
                 kv_data[k] = default_db[k]
@@ -251,7 +259,7 @@ def _get_json_db() -> Dict[str, Any]:
 
     # Fetch from Telegram Cloud Backup
     tg_data = _fetch_telegram_backup()
-    if tg_data and isinstance(tg_data, dict):
+    if tg_data and isinstance(tg_data, dict) and (tg_data.get("teams") or tg_data.get("routes") or tg_data.get("stations")):
         for k in default_db:
             if k not in tg_data:
                 tg_data[k] = default_db[k]
@@ -273,8 +281,6 @@ def _get_json_db() -> Dict[str, Any]:
 
     return default_db
 
-import threading
-
 def _save_json_db(data: Dict[str, Any]):
     for path in JSON_PATHS:
         try:
@@ -283,8 +289,11 @@ def _save_json_db(data: Dict[str, Any]):
         except Exception:
             pass
     try:
-        threading.Thread(target=_save_kv_db, args=(data,), daemon=True).start()
-        threading.Thread(target=_save_telegram_backup, args=(data,), daemon=True).start()
+        _save_kv_db(data)
+    except Exception:
+        pass
+    try:
+        _save_telegram_backup(data)
     except Exception:
         pass
 
