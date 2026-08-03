@@ -3,7 +3,7 @@ import os
 import time
 import re
 import database as db
-from config import DB_PATH
+from config import DB_PATH, STATION_COOLDOWN_SECONDS
 from user_handlers import get_done_inline_keyboard, get_done_reply_keyboard
 
 async def run_tests():
@@ -87,13 +87,13 @@ async def run_tests():
     assert prog["status"] == "in_progress"
     print("9. User progress initialized at index 0.")
     
-    # Cooldown check: 200s passed < 300s -> Not ready
+    # Cooldown check: 200s passed < STATION_COOLDOWN_SECONDS -> Not ready
     elapsed = 200
-    assert elapsed < 300
-    print("10. 5-minute timer restriction verified (200s < 300s).")
+    assert elapsed < STATION_COOLDOWN_SECONDS
+    print(f"10. Station timer restriction verified (200s < {STATION_COOLDOWN_SECONDS}s).")
     
-    # Advance station after 300s
-    await db.advance_user_station(12345678, 1, now + 301)
+    # Advance station after STATION_COOLDOWN_SECONDS
+    await db.advance_user_station(12345678, 1, now + STATION_COOLDOWN_SECONDS + 1)
     prog_next = await db.get_user_progress(12345678)
     assert prog_next["current_index"] == 1
     print("11. Advanced to station index 1.")

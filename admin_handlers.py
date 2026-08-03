@@ -4,7 +4,7 @@ import logging
 from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from config import ADMIN_GROUP_ID
+from config import ADMIN_GROUP_ID, STATION_COOLDOWN_SECONDS
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -224,7 +224,7 @@ async def cmd_game_start(message: types.Message):
         msg_text = (
             f"🚀 **ГРА РОЗПОЧАЛАСЯ!**\n\n"
             f"📍 Перше завдання: **{st_name}**\n\n"
-            f"⏱️ На виконання відводиться 5 хвилин.\n"
+            f"⏱️ На виконання відводиться {STATION_COOLDOWN_SECONDS // 60} хвилин.\n"
             f"Після завершення натисніть кнопку **«✅ Виконано»** нижче."
         )
         

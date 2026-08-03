@@ -13,11 +13,199 @@ except ImportError:
 
 import json
 
-# Fallback JSON storage paths
+import urllib.request
+import urllib.parse
+
+# Fallback JSON storage paths (/tmp/bot_data.json takes priority over static bot_data.json)
 JSON_PATHS = [
-    "bot_data.json",
-    "/tmp/bot_data.json"
+    "/tmp/bot_data.json",
+    "bot_data.json"
 ]
+
+def _fetch_kv_db() -> Optional[Dict[str, Any]]:
+    url = os.getenv("KV_REST_API_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("KV_REST_API_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if not url or not token:
+        return None
+    try:
+        req_url = f"{url.rstrip('/')}/get/bot_data_json"
+        req = urllib.request.Request(req_url, headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            res = json.loads(response.read().decode("utf-8"))
+            val = res.get("result")
+            if val:
+                if isinstance(val, str):
+                    return json.loads(val)
+                elif isinstance(val, dict):
+                    return val
+    except Exception:
+        pass
+    return None
+
+def _save_kv_db(data: Dict[str, Any]):
+    url = os.getenv("KV_REST_API_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
+    token = os.getenv("KV_REST_API_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN")
+    if not url or not token:
+        return
+    try:
+        json_str = json.dumps(data, ensure_ascii=False)
+        req_url = f"{url.rstrip('/')}/set/bot_data_json"
+        req_data = json_str.encode("utf-8")
+        req = urllib.request.Request(req_url, data=req_data, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as response:
+            pass
+    except Exception:
+        pass
+
+def _get_bot_and_group():
+    try:
+        from config import BOT_TOKEN, ADMIN_GROUP_ID
+        if not BOT_TOKEN or "YOUR_BOT_TOKEN" in BOT_TOKEN or not ADMIN_GROUP_ID:
+            return None, None
+        return BOT_TOKEN, ADMIN_GROUP_ID
+    except Exception:
+        return None, None
+
+def _fetch_telegram_backup() -> Optional[Dict[str, Any]]:
+    bot_token, admin_group_id = _get_bot_and_group()
+    if not bot_token or not admin_group_id:
+        return None
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/getChat?chat_id={admin_group_id}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            if not res.get("ok"):
+                return None
+            chat = res.get("result", {})
+            pinned = chat.get("pinned_message")
+            if not pinned:
+                return None
+            
+            text = pinned.get("text") or pinned.get("caption") or ""
+            if "[BOT_DB_BACKUP]" not in text:
+                return None
+            
+            if "```json" in text:
+                json_part = text.split("```json")[1].split("```")[0].strip()
+                return json.loads(json_part)
+            elif text.strip().startswith("{") and text.strip().endswith("}"):
+                return json.loads(text.strip())
+            
+            doc = pinned.get("document")
+            if doc and doc.get("file_id"):
+                file_id = doc["file_id"]
+                file_url = f"https://api.telegram.org/bot{bot_token}/getFile?file_id={file_id}"
+                with urllib.request.urlopen(urllib.request.Request(file_url), timeout=5) as f_resp:
+                    f_res = json.loads(f_resp.read().decode("utf-8"))
+                    file_path = f_res.get("result", {}).get("file_path")
+                    if file_path:
+                        dl_url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+                        with urllib.request.urlopen(urllib.request.Request(dl_url), timeout=5) as dl_resp:
+                            content = dl_resp.read().decode("utf-8")
+                            return json.loads(content)
+    except Exception:
+        pass
+    return None
+
+_telegram_backup_msg_id = None
+
+def _save_telegram_backup(data: Dict[str, Any]):
+    global _telegram_backup_msg_id
+    bot_token, admin_group_id = _get_bot_and_group()
+    if not bot_token or not admin_group_id:
+        return
+    try:
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        if not _telegram_backup_msg_id:
+            try:
+                get_chat_url = f"https://api.telegram.org/bot{bot_token}/getChat?chat_id={admin_group_id}"
+                with urllib.request.urlopen(urllib.request.Request(get_chat_url), timeout=4) as resp:
+                    res = json.loads(resp.read().decode("utf-8"))
+                    if res.get("ok"):
+                        pinned = res.get("result", {}).get("pinned_message")
+                        if pinned:
+                            p_text = pinned.get("text") or pinned.get("caption") or ""
+                            if "[BOT_DB_BACKUP]" in p_text:
+                                _telegram_backup_msg_id = pinned.get("message_id")
+            except Exception:
+                pass
+
+        if len(json_str) < 3800:
+            msg_text = f"🤖 [BOT_DB_BACKUP]\n```json\n{json_str}\n```"
+            if _telegram_backup_msg_id:
+                edit_url = f"https://api.telegram.org/bot{bot_token}/editMessageText"
+                payload = json.dumps({
+                    "chat_id": admin_group_id,
+                    "message_id": _telegram_backup_msg_id,
+                    "text": msg_text,
+                    "parse_mode": "Markdown"
+                }).encode("utf-8")
+                req = urllib.request.Request(edit_url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        res = json.loads(resp.read().decode("utf-8"))
+                        if res.get("ok"):
+                            return
+                except Exception:
+                    pass
+            
+            send_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = json.dumps({
+                "chat_id": admin_group_id,
+                "text": msg_text,
+                "parse_mode": "Markdown"
+            }).encode("utf-8")
+            req = urllib.request.Request(send_url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                if res.get("ok"):
+                    msg_id = res["result"]["message_id"]
+                    _telegram_backup_msg_id = msg_id
+                    pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage"
+                    pin_payload = json.dumps({
+                        "chat_id": admin_group_id,
+                        "message_id": msg_id,
+                        "disable_notification": True
+                    }).encode("utf-8")
+                    try:
+                        urllib.request.urlopen(urllib.request.Request(pin_url, data=pin_payload, headers={"Content-Type": "application/json"}, method="POST"), timeout=4)
+                    except Exception:
+                        pass
+        else:
+            file_bytes = json_str.encode("utf-8")
+            boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+            body = bytearray()
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{admin_group_id}\r\n'.encode("utf-8"))
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(f'Content-Disposition: form-data; name="caption"\r\n\r\n🤖 [BOT_DB_BACKUP]\r\n'.encode("utf-8"))
+            body.extend(f"--{boundary}\r\n".encode("utf-8"))
+            body.extend(f'Content-Disposition: form-data; name="document"; filename="bot_data_backup.json"\r\n'.encode("utf-8"))
+            body.extend(f'Content-Type: application/json\r\n\r\n'.encode("utf-8"))
+            body.extend(file_bytes)
+            body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
+            
+            doc_url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+            req = urllib.request.Request(doc_url, data=bytes(body), headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, method="POST")
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                res = json.loads(resp.read().decode("utf-8"))
+                if res.get("ok"):
+                    msg_id = res["result"]["message_id"]
+                    _telegram_backup_msg_id = msg_id
+                    pin_url = f"https://api.telegram.org/bot{bot_token}/pinChatMessage"
+                    pin_payload = json.dumps({
+                        "chat_id": admin_group_id,
+                        "message_id": msg_id,
+                        "disable_notification": True
+                    }).encode("utf-8")
+                    try:
+                        urllib.request.urlopen(urllib.request.Request(pin_url, data=pin_payload, headers={"Content-Type": "application/json"}, method="POST"), timeout=4)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
 
 def _get_json_db() -> Dict[str, Any]:
     default_db = {
@@ -39,6 +227,37 @@ def _get_json_db() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Check /tmp/bot_data.json first if it has dynamic data
+    tmp_path = "/tmp/bot_data.json"
+    if os.path.exists(tmp_path):
+        try:
+            with open(tmp_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict) and (data.get("teams") or data.get("stations") or data.get("routes")):
+                    for k in default_db:
+                        if k not in data:
+                            data[k] = default_db[k]
+                    return data
+        except Exception:
+            pass
+
+    # Fetch from Vercel KV / Upstash Redis
+    kv_data = _fetch_kv_db()
+    if kv_data and isinstance(kv_data, dict):
+        for k in default_db:
+            if k not in kv_data:
+                kv_data[k] = default_db[k]
+        return kv_data
+
+    # Fetch from Telegram Cloud Backup
+    tg_data = _fetch_telegram_backup()
+    if tg_data and isinstance(tg_data, dict):
+        for k in default_db:
+            if k not in tg_data:
+                tg_data[k] = default_db[k]
+        return tg_data
+
+    # Fallback to local files
     for path in JSON_PATHS:
         if os.path.exists(path):
             try:
@@ -51,7 +270,10 @@ def _get_json_db() -> Dict[str, Any]:
                         return data
             except Exception:
                 pass
+
     return default_db
+
+import threading
 
 def _save_json_db(data: Dict[str, Any]):
     for path in JSON_PATHS:
@@ -60,6 +282,11 @@ def _save_json_db(data: Dict[str, Any]):
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+    try:
+        threading.Thread(target=_save_kv_db, args=(data,), daemon=True).start()
+        threading.Thread(target=_save_telegram_backup, args=(data,), daemon=True).start()
+    except Exception:
+        pass
 
 def _sync_sqlite_to_json():
     if not HAS_SQLITE:

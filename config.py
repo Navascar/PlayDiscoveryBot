@@ -10,8 +10,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # Admin Group Telegram Chat ID
 ADMIN_GROUP_ID = int(os.getenv("ADMIN_GROUP_ID", "-1001234567890"))
 
-# Station duration timer in seconds (5 minutes = 300 seconds)
-STATION_COOLDOWN_SECONDS = int(os.getenv("STATION_COOLDOWN_SECONDS", "300"))
+# Station duration timer in seconds (8 minutes = 480 seconds)
+STATION_COOLDOWN_SECONDS = int(os.getenv("STATION_COOLDOWN_SECONDS", "480"))
 
 # Database path (On Vercel serverless, only /tmp directory is writable)
 if os.getenv("VERCEL"):
